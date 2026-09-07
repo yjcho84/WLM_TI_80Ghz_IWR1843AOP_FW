@@ -1,0 +1,108 @@
+현재 폴더 코드 설명
+====================
+
+[개요]
+이 폴더는 Texas Instruments(TI)의 mmWave SDK를 기반으로 한 IWR1843(AWR1843) 밀리미터파(mmWave)
+레이더 센서용 "Out of Box" 데모 펌웨어의 CCS(Code Composer Studio) 프로젝트입니다.
+TI의 XWR18xx SoC는 ARM Cortex-R4F(MSS, Master Sub-System)와 C674x DSP(DSS, DSP Sub-System)를
+동시에 내장하고 있으며, 두 개의 서브 프로세서가 협력하여 레이더 신호를 처리합니다.
+이 폴더에는 그 두 서브시스템 각각에 대응하는 두 개의 프로젝트가 들어 있습니다.
+
+  - Out_Of_Box_1843_MSS      : R4F(마스터 서브시스템)용 프로젝트
+  - out_of_box_1843_dss      : C674x DSP(데이터 처리 서브시스템)용 프로젝트
+
+각 프로젝트는 "isk"(안테나 모듈 보드, IWR1843ISK 등)와 "aop"(Antenna-on-Package 보드,
+AWR1843AOP 등) 두 가지 빌드 구성(build configuration)을 갖고 있으며, 빌드 산출물(.bin, .map,
+링크 정보 xml 등)이 각 폴더에 저장되어 있습니다.
+
+
+[전체 동작 개념]
+레이더 프론트엔드(BSS, RF/analog 서브시스템)에서 생성된 ADC 원시 샘플을 DSS가 받아 1D/2D FFT,
+CFAR(Constant False Alarm Rate) 탐지, 각도(방위각/고도각) 추정 등 신호처리 체인을 수행하여
+탐지된 물체(포인트 클라우드: 거리, 속도, x/y/z 좌표 등)를 산출합니다. 이 결과는 공유 메모리
+(HSRAM)를 통해 MSS로 전달되고, MSS는 이를 UART로 패킷화하여 PC(TI mmWave Demo Visualizer 등)로
+전송합니다. 사용자는 UART 상의 CLI(명령줄 인터페이스)를 통해 chirp 프로파일, 안테나 구성 등을
+설정할 수 있습니다.
+
+
+[MSS 프로젝트 - Out_Of_Box_1843_MSS]  (ARM Cortex-R4F)
+주요 역할: 시스템 초기화, RF(BSS) 제어, CLI 처리, 결과 수신 및 UART 송신, 각종 보조 기능 제공.
+
+- mss_main.c
+    데모의 메인 진입점. SYSBIOS 태스크(MmwDemo_initTask, CLI_task, MmwDemo_mmWaveCtrlTask,
+    mmwDemo_mssDPMTask 등)를 생성/실행합니다. 드라이버 초기화, MMWave 모듈 초기화(MMWave_init),
+    DPM(Data Path Manager) 초기화, UART 및 ADCBUF 등 데이터 경로 관련 드라이버를 오픈합니다.
+    센서 시작/정지 CLI 명령 처리, DSS에서 넘어온 탐지 결과를 UART로 출력하는 로직도 포함합니다.
+
+- mmw_cli.c
+    mmWave 데모의 CLI(명령줄 인터페이스) 구현. UART로 입력되는 chirp 프로파일, 프레임 설정,
+    GUI/모니터 설정 등 각종 설정 명령을 파싱하여 시스템에 반영합니다.
+
+- mmwdemo_rfparser.c
+    RF(레이더 파라미터) 파서. Chirp/Profile/Frame 설정값을 해석해 안테나 배열, ADC 버퍼 크기,
+    방위각/고도각용 Tx 안테나 마스크 등 데이터 경로에 필요한 하드웨어 구성 정보를 산출합니다.
+
+- mmwdemo_adcconfig.c
+    ADC(아날로그-디지털 변환기) 관련 상위 레벨 open/config API 구현. ADC 버프(ADCBUF) 설정을
+    담당합니다.
+
+- mmwdemo_monitor.c
+    RF/디지털 모니터링(자가진단) 기능 지원 파일. 센서 상태 모니터링 관련 기능을 구현합니다.
+
+- mmwdemo_flash.c
+    QSPI 플래시 접근 기능 구현. 플래시에 저장된 설정/보정 데이터 등을 읽고 쓰는 데 사용됩니다.
+
+- mmw_lvds_stream.c
+    LVDS(저전압 차동 신호) 스트리밍 기능 구현. 원시 ADC 데이터나 중간 처리 결과를 LVDS 인터페이스로
+    외부로 스트리밍할 수 있게 합니다.
+
+- antenna_geometry.c
+    보드별(XWR1642, IWR6843 AOP, XWR1843/XWR6843 표준 EVM, AWR1843 AOP 등) 안테나 배열 지오메트리
+    정의. 각도 추정(AoA) 계산에 필요한 안테나 위치 정보를 제공합니다.
+
+- objdetrangehwa.c
+    Range-HWA(하드웨어 가속기)만 사용하는 축소판 Object Detection DPC(Data Path Chain) 구현.
+    DPM에 등록되어 range 처리 체인을 수행하는 변형입니다.
+
+- mmw_mss.cfg / mmw_mss_linker.cmd / r4f_linker.cmd
+    SYSBIOS/XDC 설정 파일 및 R4F용 링커 스크립트.
+
+
+[DSS 프로젝트 - out_of_box_1843_dss]  (C674x DSP)
+주요 역할: 실제 신호처리(레이더 큐브 생성, FFT, CFAR, 각도추정 등) 수행.
+
+- dss_main.c
+    DSP 측 메인 진입점. MmwDemo_initTask에서 EDMA/HWA(Hardware Accelerator) 등 드라이버와 DPM을
+    초기화하고, MmwDemo_DPC_ObjectDetection_dpmTask를 실행하여 DPM_execute 루프 안에서 Object
+    Detection DPC(등록된 처리 체인)를 반복 수행합니다. 처리 결과를 MSS로 전달(공유 메모리 HSRAM)
+    합니다.
+
+- objectdetection.c
+    Object Detection DPC(Data Path Chain)의 핵심 구현. Range 처리 → Doppler(2D) 처리 →
+    CFAR 탐지 → AoA(방위각/고도각, 2D-AoA DPU 옵션 포함) 처리로 이어지는 신호처리 체인을 DPM에
+    등록하고 실행/제어(IOCTL)하는 로직을 포함합니다. HWA 및 EDMA 자원을 사용해 가속 처리합니다.
+
+- data_path.c
+    데이터 경로에서 사용하는 HWA/EDMA 드라이버의 초기화(init)/오픈(open)/종료(close) 및 에러
+    콜백(HWA/EDMA 오류 처리) 등 저수준 하드웨어 설정 기능을 구현합니다.
+
+- antenna_geometry.c
+    MSS와 동일한 목적의 안테나 지오메트리 정의(보드별 안테나 배열 좌표)로, DSS에서도 각도추정
+    계산에 사용됩니다.
+
+- mmw_dss.cfg / mmw_dss_linker.cmd / c674x_linker.cmd
+    SYSBIOS/XDC 설정 파일 및 C674x DSP용 링커 스크립트.
+
+
+[공통 사항]
+- src/sysbios : TI-RTOS(SYSBIOS) 커널 오브젝트 파일 및 makefile (Task/Hwi/Exception 지원 등).
+- aop, isk 하위 폴더 : 각각 AOP(Antenna-on-Package)와 ISK(안테나 모듈) 보드용 빌드 산출물
+  (컴파일된 오브젝트 종속성 .d, 링커 결과 .bin/.map/.xer4f/.xe674, makefile 등).
+- targetConfigs (DSS) : CCS 타겟 설정 관련 폴더.
+
+[요약]
+결론적으로 이 코드는 TI IWR1843/AWR1843 mmWave 레이더 SoC 위에서 동작하는 "Out of Box" 참조
+데모로, R4F(MSS)가 시스템 제어·CLI·UART 통신을 담당하고 C674x DSP(DSS)가 레인지/도플러 FFT,
+CFAR 탐지, 방위각/고도각 추정 등 실제 레이더 신호처리를 수행하여, 탐지된 물체의 포인트 클라우드
+(거리, 속도, x/y/z 좌표)와 각종 통계/히트맵 정보를 UART를 통해 PC의 mmWave Demo Visualizer로
+실시간 전송하는 임베디드 레이더 신호처리 펌웨어입니다.
