@@ -1502,9 +1502,10 @@ void MmwDemo_CLIInit (uint8_t taskPriority)
     uint32_t    cnt;
 
     /* Create Demo Banner to be printed out by CLI */
+                        //"xWR18xx MMW Demo %02d.%02d.%02d.%02d\n"  
     sprintf(&demoBanner[0], 
                        "******************************************\n" \
-                       "xWR18xx MMW Demo %02d.%02d.%02d.%02d\n"  \
+                       "SEX18xx MMW Demo %02d.%02d.%02d.%02d\n"  \
                        "******************************************\n", 
                         MMWAVE_SDK_VERSION_MAJOR,
                         MMWAVE_SDK_VERSION_MINOR,
