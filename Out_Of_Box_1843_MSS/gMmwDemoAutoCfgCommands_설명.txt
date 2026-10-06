@@ -1,0 +1,389 @@
+====================================================================
+ mmw_cli.c - gMmwDemoAutoCfgCommands[] 파라미터 설명
+ (대상: Out_Of_Box_1843_MSS/mmw_cli.c, 현재 활성화된 배열: 169~205행)
+====================================================================
+
+이 배열은 원래 Tera Term 매크로나 GUI를 통해 시리얼로 한 줄씩 입력하던
+CLI 설정 파일(.cfg)을 그대로 옮겨 놓은 것으로, 부팅 시 자동으로
+MmwDemo_CLIAutoConfig() 함수가 이 배열을 한 줄씩 CLI_MMWaveExtensionHandler /
+각 커맨드 핸들러로 넘겨 실행합니다. 즉 실제 UART로 .cfg 파일을 보내는 것과
+동일한 효과를 냅니다. 마지막 줄 "sensorStart"까지 실행되면 센서가 바로
+동작을 시작합니다.
+
+※ 134~166행에는 예전 버전(주석 처리됨)이 남아있습니다. 차이점은 각 항목
+   설명 하단에 "(구버전/주석 처리된 값)"으로 같이 표기했습니다.
+
+
+--------------------------------------------------------------------
+1) "sensorStop"
+--------------------------------------------------------------------
+- 인자 없음.
+- 센서(레이더 프런트엔드)가 동작 중이면 정지시킴. 정지 상태면 무시됨.
+- 새 설정을 적용하기 전에 항상 센서를 먼저 멈추는 것이 관례.
+
+
+--------------------------------------------------------------------
+2) "flushCfg"
+--------------------------------------------------------------------
+- 인자 없음.
+- 이전에 CLI로 저장돼 있던 모든 설정(channelCfg, profileCfg, chirpCfg,
+  frameCfg 등)을 전부 초기화(삭제).
+- 이후 줄부터 설정을 처음부터 새로 쌓아 올리기 위한 초기화 명령.
+
+
+--------------------------------------------------------------------
+3) "dfeDataOutputMode 1"
+--------------------------------------------------------------------
+- 인자1 = 1 : DFE(Digital Front End) 데이터 출력 모드
+    1 = Frame based chirps (레거시 프레임 기반 모드, 이 데모가 사용하는 모드)
+    2 = Continuous streaming mode
+    3 = Advanced frame config mode
+- 이 값(1)이 프레임 기반 모드를 쓴다는 뜻이며, 이후의 channelCfg/profileCfg/
+  chirpCfg/frameCfg 명령들이 모두 이 모드를 전제로 해석됨.
+
+
+--------------------------------------------------------------------
+4) "channelCfg 15 7 0"
+--------------------------------------------------------------------
+- 인자1 = 15  : rxChannelEn (RX 안테나 활성화 비트마스크, 15 = 0b1111
+                → RX0~RX3 4개 채널 전부 사용)
+- 인자2 = 7   : txChannelEn (TX 안테나 활성화 비트마스크, 7 = 0b111
+                → TX0~TX2 3개 채널 전부 사용)
+- 인자3 = 0   : cascading (단일 칩 구성 여부, 0 = 단일 칩, cascade 미사용)
+- 즉 4RX x 3TX = 12 가상 안테나 구성.
+
+
+--------------------------------------------------------------------
+5) "adcCfg 2 1"
+--------------------------------------------------------------------
+- 인자1 = 2 : numADCBits (0=12bit, 1=14bit, 2=16bit) → 16비트 ADC 사용
+- 인자2 = 1 : adcOutputFmt (0=real, 1=complex 1x(필터링됨), 2=complex 2x)
+              → Complex 1x(영상대역 필터링된 복소수) 출력 사용
+
+
+--------------------------------------------------------------------
+6) "adcbufCfg -1 0 1 1 1"
+   (핸들러: MmwDemo_CLIADCBufCfg, mmw_cli.c 986행)
+--------------------------------------------------------------------
+- 인자1 = -1 : subFrameNum (-1 = 모든 서브프레임에 동일 적용, 이 데모는
+              서브프레임을 안 쓰므로 항상 -1)
+- 인자2 = 0  : adcFmt (0 = complex, 1 = real)
+- 인자3 = 1  : iqSwapSel (I/Q 샘플 순서 스왑, 0=스왑 안 함, 1=I/Q 스왑)
+- 인자4 = 1  : chInterleave (0=interleaved, 1=non-interleaved
+              → xWR18xx는 non-interleaved만 지원)
+- 인자5 = 1  : chirpThreshold (인터럽트당 처리할 chirp 개수. 이 데모는 HWA로
+              1D 프로세싱을 하기 때문에 반드시 1이어야 하며, 코드에서도
+              1이 아니면 에러 처리함)
+
+
+--------------------------------------------------------------------
+7) "profileCfg 0 77 267 7 57.14 0 0 70 1 464 9442 0 0 30"
+--------------------------------------------------------------------
+필드 순서: profileId startFreq idleTime adcStartTime rampEndTime
+           txOutPower txPhaseShifter freqSlopeConst txStartTime
+           numAdcSamples digOutSampleRate hpfCornerFreq1 hpfCornerFreq2 rxGain
+
+- profileId          = 0      : 프로파일 번호(0~3 중 선택)
+- startFreq           = 77     : 시작 주파수 (GHz)
+- idleTime            = 267    : 처프 사이 idle 시간 (usec)
+- adcStartTime        = 7      : 처프 시작 후 ADC 샘플링 시작까지 시간 (usec)
+- rampEndTime         = 57.14  : 처프(램프) 종료 시간 (usec)
+- txOutPower          = 0      : TX 출력 파워 백오프 코드 (0 = 백오프 없음)
+- txPhaseShifter      = 0      : TX 위상 시프터 (0 = 사용 안 함)
+- freqSlopeConst      = 70     : 주파수 슬로프 (MHz/usec)
+- txStartTime         = 1      : 처프 시작 후 TX 시작까지 지연 (usec)
+- numAdcSamples       = 464    : 처프당 ADC 샘플 개수
+- digOutSampleRate    = 9442   : ADC 샘플링 레이트 (ksps)
+- hpfCornerFreq1      = 0      : 1차 HPF 코너 주파수 (0=175kHz)
+- hpfCornerFreq2      = 0      : 2차 HPF 코너 주파수 (0=350kHz)
+- rxGain              = 30     : RX 게인 (dB)
+
+→ 대역폭(=freqSlopeConst x rampEndTime ≈ 70MHz/us x 57.14us ≈ 4GHz)과
+  numAdcSamples/digOutSampleRate로부터 거리 해상도/최대 거리가 결정됨.
+
+
+--------------------------------------------------------------------
+8~10) chirpCfg (3줄, TX0/TX1/TX2 각각 하나씩)
+   "chirpCfg 0 0 0 0 0 0 0 1"
+   "chirpCfg 1 1 0 0 0 0 0 2"
+   "chirpCfg 2 2 0 0 0 0 0 4"
+--------------------------------------------------------------------
+필드 순서: chirpStartIdx chirpEndIdx profileId startFreqVar freqSlopeVar
+           idleTimeVar adcStartTimeVar txMask
+
+각 줄 공통: profileId=0 사용, startFreqVar/freqSlopeVar/idleTimeVar/
+           adcStartTimeVar 모두 0 (profileCfg 값을 그대로 사용, 추가 오프셋 없음)
+
+- 1번째 줄: chirpStartIdx=0, chirpEndIdx=0, txMask=1 (0b001 → TX0만 송신)
+- 2번째 줄: chirpStartIdx=1, chirpEndIdx=1, txMask=2 (0b010 → TX1만 송신)
+- 3번째 줄: chirpStartIdx=2, chirpEndIdx=2, txMask=4 (0b100 → TX2만 송신)
+
+→ TDM-MIMO 구성: 처프 인덱스 0/1/2가 각각 TX0/TX1/TX2를 순서대로 쏘도록
+  정의. frameCfg에서 이 0~2번 처프를 하나의 버스트로 반복.
+
+
+--------------------------------------------------------------------
+11) "frameCfg 0 2 16 0 1000 1 0"
+--------------------------------------------------------------------
+필드 순서: chirpStartIdx chirpEndIdx numLoops numFrames
+           framePeriodicity triggerSelect frameTriggerDelay
+
+- chirpStartIdx     = 0    : 프레임에서 사용할 첫 chirp 인덱스
+- chirpEndIdx       = 2    : 마지막 chirp 인덱스 (0~2 → TX0/1/2 세 개 사용)
+- numLoops          = 16   : chirpStartIdx~chirpEndIdx 묶음을 프레임당
+                              반복하는 횟수 (→ 프레임당 총 chirp 수 = 3x16=48)
+- numFrames         = 0    : 전송할 프레임 수 (0 = 무한 반복)
+- framePeriodicity  = 1000 : 프레임 주기 (ms) → 1프레임/초(1fps)
+- triggerSelect     = 1    : 프레임 트리거 소스 (1 = 소프트웨어 트리거)
+- frameTriggerDelay = 0    : 트리거 후 지연 시간 (ms)
+
+※ 182행에 주석 처리된 "frameCfg 0 2 32 0 100 1 0" (->26.09.02)는
+  numLoops를 32로, framePeriodicity를 100ms(10fps)로 바꾼 실험용 값으로
+  보이며 현재는 비활성 상태(1fps, numLoops=16)로 되돌아가 있음.
+
+
+--------------------------------------------------------------------
+12) "lowPower 0 0"
+--------------------------------------------------------------------
+- 인자1 = 0 : reserved (항상 0)
+- 인자2 = 0 : ADC 저전력 모드 선택 (0 = Regular ADC power mode,
+              1 = Low power ADC mode)
+→ 저전력 ADC 모드를 사용하지 않음(일반 모드).
+
+
+--------------------------------------------------------------------
+13) "guiMonitor -1 1 0 0 0 0 0"
+   (핸들러: MmwDemo_CLIGuiMonSel, mmw_cli.c 606행)
+   (구버전/주석: "guiMonitor -1 1 1 0 0 0 1")
+--------------------------------------------------------------------
+- 인자1 = -1 : subFrameNum (전체 서브프레임)
+- 인자2 = 1  : detectedObjects  → Point Cloud(감지된 객체 리스트) 출력 ON
+- 인자3 = 0  : logMagRange      → Range profile(로그 크기) 출력 OFF
+              (구버전은 1=ON)
+- 인자4 = 0  : noiseProfile     → Noise profile 출력 OFF
+- 인자5 = 0  : rangeAzimuthHeatMap → Range-Azimuth heat map 출력 OFF
+- 인자6 = 0  : rangeDopplerHeatMap → Range-Doppler heat map 출력 OFF
+- 인자7 = 0  : statsInfo        → 통계정보(Stats TLV) 출력 OFF
+              (구버전은 1=ON)
+→ 현재는 point cloud만 UART로 내보내고 나머지 디버그용 TLV는 모두 꺼서
+  UART 대역폭/처리 부담을 줄인 구성.
+
+
+--------------------------------------------------------------------
+14) "cfarCfg -1 0 2 8 4 3 0 15 1"   → Range 방향 CFAR
+15) "cfarCfg -1 1 0 4 2 3 1 15 1"   → Doppler 방향 CFAR
+   (핸들러: MmwDemo_CLICfarCfg, mmw_cli.c 648행)
+--------------------------------------------------------------------
+필드 순서: subFrameNum procDirection averageMode winLen guardLen
+           noiseDivShift cyclicMode thresholdScale(dB) peakGroupingEn
+
+[14번 줄 - Range CFAR]
+- subFrameNum   = -1 : 전체 서브프레임
+- procDirection = 0  : 0 = Range 방향 CFAR 설정
+- averageMode   = 2  : CFAR 평균 방식 (0=CA, 1=CAGO, 2=CASO
+                        → Cell Averaging Smallest Of 사용)
+- winLen        = 8  : 레퍼런스(noise 추정) 윈도우 길이
+- guardLen      = 4  : 가드 셀 길이
+- noiseDivShift = 3  : 노이즈 평균 계산용 나눗셈 시프트 값
+- cyclicMode    = 0  : 순환(wrap-around) 모드 비활성 (range는 순환 아님)
+- thresholdScale= 15 : 검출 임계값 (dB)
+- peakGroupingEn= 1  : 피크 그룹핑 활성화(인접 피크 중 최댓값만 채택)
+
+[15번 줄 - Doppler CFAR]
+- procDirection = 1  : 1 = Doppler 방향 CFAR 설정
+- averageMode   = 0  : CFAR-CA(Cell Averaging) 사용
+- winLen        = 4  : 윈도우 길이
+- guardLen      = 2  : 가드 셀 길이
+- noiseDivShift = 3
+- cyclicMode    = 1  : 순환 모드 활성화 (도플러 축은 순환 구조이므로 필요)
+- thresholdScale= 15 : 임계값 (dB)
+- peakGroupingEn= 1
+
+
+--------------------------------------------------------------------
+16) "multiObjBeamForming -1 0 0.5"
+   (핸들러: MmwDemo_CLIMultiObjBeamForming, mmw_cli.c 845행)
+   (구버전/주석: "multiObjBeamForming -1 1 0.5")
+--------------------------------------------------------------------
+- 인자1 = -1  : subFrameNum
+- 인자2 = 0   : enabled (0 = 비활성화. 구버전은 1=활성화)
+              → 동일 range/doppler bin에 여러 물체가 겹쳐 있을 때
+                다중 피크를 분리해내는 기능인데 현재는 꺼져 있음.
+- 인자3 = 0.5 : multiPeakThrsScal (다중 피크로 판단하는 임계 스케일,
+                enabled=0이라 현재는 미사용 값)
+
+
+--------------------------------------------------------------------
+17) "clutterRemoval -1 0"
+   (핸들러: MmwDemo_CLIClutterRemoval, mmw_cli.c 948행)
+--------------------------------------------------------------------
+- 인자1 = -1 : subFrameNum
+- 인자2 = 0  : enabled (정적 클러터 제거 기능 비활성화)
+→ 정지된 배경(클러터) 제거 필터를 쓰지 않음. (정지 물체도 그대로 검출)
+
+
+--------------------------------------------------------------------
+18) "calibDcRangeSig -1 1 -5 8 256"
+   (핸들러: MmwDemo_CLICalibDcRangeSig, mmw_cli.c 884행)
+   (구버전/주석: "calibDcRangeSig -1 0 -5 8 256")
+--------------------------------------------------------------------
+- 인자1 = -1  : subFrameNum
+- 인자2 = 1   : enabled (DC/Range 시그니처 보정 활성화. 구버전은 0=비활성)
+- 인자3 = -5  : negativeBinIdx (보정에 사용할 음수 range bin 인덱스)
+- 인자4 = 8   : positiveBinIdx (보정에 사용할 양수 range bin 인덱스)
+- 인자5 = 256 : numAvgChirps (평균낼 chirp 수, 반드시 2의 거듭제곱이어야
+                하며 코드에서 검증함)
+→ 초기 몇 프레임 동안 range bin -5~8 구간의 DC/근거리 누설 신호를
+  256개 chirp 평균으로 추정해 이후 보정하는 기능을 켬(구버전 대비 변경점).
+
+
+--------------------------------------------------------------------
+19) "extendedMaxVelocity -1 0"
+   (핸들러: MmwDemo_CLIExtendedMaxVelocity, mmw_cli.c 808행)
+--------------------------------------------------------------------
+- 인자1 = -1 : subFrameNum
+- 인자2 = 0  : enabled (속도 앨리어싱 확장(디앰비규에이션) 기능 비활성화)
+
+
+--------------------------------------------------------------------
+20) "lvdsStreamCfg -1 0 0 0"
+   (핸들러: MmwDemo_CLILvdsStreamCfg, mmw_cli.c 1292행)
+--------------------------------------------------------------------
+- 인자1 = -1 : subFrameNum
+- 인자2 = 0  : isHeaderEnabled (HSI 헤더 비활성화)
+- 인자3 = 0  : dataFmt (0 = LVDS 스트리밍 disabled)
+- 인자4 = 0  : isSwEnabled (소프트웨어 세션 비활성화)
+→ LVDS 고속 스트리밍 기능 전체를 사용하지 않음(UART 출력만 사용).
+
+
+--------------------------------------------------------------------
+21) "compRangeBiasAndRxChanPhase 0.0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0"
+   (핸들러: MmwDemo_CLICompRangeBiasAndRxChanPhaseCfg, mmw_cli.c 1042행)
+--------------------------------------------------------------------
+- 인자1 = 0.0 : rangeBias (m) → 거리 오프셋 보정값 없음
+- 이후 24개 값 = (Re, Im) 쌍 12개 : TX(3) x RX(4) = 12개 가상 채널 각각의
+  위상/이득 보정 계수. 여기서는 모두 (Re=1, Im=0) 패턴 → 스케일 1.0,
+  위상 0도로, 사실상 "보정 없음(identity)" 상태.
+→ 실제 안테나 캘리브레이션(measureRangeBiasAndRxChanPhase)을 아직
+  적용하지 않은 기본값 상태.
+
+
+--------------------------------------------------------------------
+22) "measureRangeBiasAndRxChanPhase 0 1.5 0.2"
+   (핸들러: MmwDemo_CLIMeasureRangeBiasAndRxChanPhaseCfg, mmw_cli.c 1099행)
+--------------------------------------------------------------------
+- 인자1 = 0   : enabled (측정 기능 비활성화 → 이번 부팅에서는 실측 안 함)
+- 인자2 = 1.5 : targetDistance (m) → 캘리브레이션용 타겟을 놓을 거리
+- 인자3 = 0.2 : searchWinSize (m) → 해당 거리 주변 탐색 윈도우 크기
+→ enabled=0이라 실제로는 동작하지 않지만, 나중에 1로 바꾸면 1.5m 거리에
+  코너리플렉터 등을 놓고 위상/거리 보정값을 자동 측정하는 데 쓰는 명령.
+
+
+--------------------------------------------------------------------
+23) "CQRxSatMonitor 0 3 5 121 0"
+   (핸들러: MmwDemo_CLIChirpQualityRxSatMonCfg, mmw_cli.c 1142행)
+--------------------------------------------------------------------
+- 인자1 = 0   : profileIndx (모니터링 대상 프로파일 번호)
+- 인자2 = 3   : satMonSel (RX 포화 모니터 모드 선택)
+- 인자3 = 5   : primarySliceDuration (usec 단위, 슬라이스 하나의 길이)
+- 인자4 = 121 : numSlices (슬라이스 개수)
+- 인자5 = 0   : rxChannelMask (모니터링에서 제외할 RX 채널 비트마스크,
+                0 = 제외 채널 없음, 전 채널 모니터링)
+
+
+--------------------------------------------------------------------
+24) "CQSigImgMonitor 0 115 8"
+   (핸들러: MmwDemo_CLIChirpQualitySigImgMonCfg, mmw_cli.c 1199행)
+   (구버전/주석: "CQSigImgMonitor 0 127 4")
+--------------------------------------------------------------------
+- 인자1 = 0   : profileIndx (모니터링 대상 프로파일 번호)
+- 인자2 = 115 : numSlices (슬라이스 개수, 구버전은 127)
+- 인자3 = 8   : timeSliceNumSamples (슬라이스당 샘플 수, 구버전은 4)
+
+
+--------------------------------------------------------------------
+25) "analogMonitor 0 0"
+   (핸들러: MmwDemo_CLIAnalogMonitorCfg, mmw_cli.c 1253행)
+--------------------------------------------------------------------
+- 인자1 = 0 : rxSatMonEn (RX 포화 모니터 활성화 여부, 0=비활성)
+- 인자2 = 0 : sigImgMonEn (Signal/Image band 모니터 활성화 여부, 0=비활성)
+→ 위에서 CQRxSatMonitor/CQSigImgMonitor로 파라미터는 설정해뒀지만,
+  실제 모니터 기능 자체는 여기서 꺼져 있는 상태.
+
+
+--------------------------------------------------------------------
+26) "aoaFovCfg -1 -90 90 -90 90"
+   (핸들러: MmwDemo_CLIAoAFovCfg, mmw_cli.c 768행)
+--------------------------------------------------------------------
+- 인자1 = -1 : subFrameNum
+- 인자2 = -90 : minAzimuthDeg (최소 방위각)
+- 인자3 = 90  : maxAzimuthDeg (최대 방위각)
+- 인자4 = -90 : minElevationDeg (최소 고도각)
+- 인자5 = 90  : maxElevationDeg (최대 고도각)
+→ 방위각/고도각 모두 ±90도, 즉 각도 방향으로는 제한을 두지 않음(풀 FOV).
+
+
+--------------------------------------------------------------------
+27) "cfarFovCfg -1 0 0 16.18"   → Range 방향 FOV 제한
+   (핸들러: MmwDemo_CLICfarFovCfg, mmw_cli.c 720행)
+   (구버전/주석: "cfarFovCfg -1 0 0 19.99")
+--------------------------------------------------------------------
+- 인자1 = -1   : subFrameNum
+- 인자2 = 0    : procDirection (0 = Range 방향)
+- 인자3 = 0    : min (최소 거리, m)
+- 인자4 = 16.18: max (최대 거리, m) — 구버전은 19.99m였음
+→ CFAR 검출 결과 중 0~16.18m 범위의 검출만 유효 처리.
+
+
+--------------------------------------------------------------------
+28) "cfarFovCfg -1 1 -1 1.00"   → Doppler(속도) 방향 FOV 제한
+--------------------------------------------------------------------
+- 인자1 = -1  : subFrameNum
+- 인자2 = 1   : procDirection (1 = Doppler 방향)
+- 인자3 = -1  : min (최소 속도, m/s)
+- 인자4 = 1.00: max (최대 속도, m/s)
+→ 속도 -1~+1 m/s 범위만 유효 검출로 처리. 이 범위 밖의 빠른 이동체는
+  걸러짐 — 거의 정지 상태이거나 매우 느리게 움직이는 대상만 잡도록
+  제한한 설정.
+
+
+--------------------------------------------------------------------
+29) "calibData 0 0 0"
+--------------------------------------------------------------------
+필드 순서: saveEnable restoreEnable flashOffset
+- 인자1 = 0 : saveEnable (RF 캘리브레이션 데이터를 플래시에 저장할지 여부)
+- 인자2 = 0 : restoreEnable (플래시에 저장된 캘리브레이션 데이터를 복원할지)
+- 인자3 = 0 : flashOffset (플래시 상의 저장 오프셋)
+→ 저장/복원 모두 비활성화 → 매번 공장 출하 캘리브레이션(내장 기본값)으로
+  RF 초기화.
+
+
+--------------------------------------------------------------------
+30) "sensorStart"
+--------------------------------------------------------------------
+- 인자 없음.
+- 지금까지 누적된 모든 설정(channelCfg~calibData)을 실제 mmWaveLink/RF
+  프런트엔드에 적용하고 프레임 전송(센싱)을 시작시키는 최종 명령.
+- 이 자동 설정 시퀀스의 마지막 줄로, 이 명령이 끝나면 보드가 별도 호스트
+  명령 없이도 바로 레이더 동작을 시작함.
+
+
+====================================================================
+ 참고: 134~166행의 주석 처리된 구버전 배열과의 주요 차이점 요약
+====================================================================
+1. numAdcSamples/digOutSampleRate : 256/5209 → 464/9442 (샘플 수·레이트 증가)
+2. guiMonitor : logMagRange 1→0, statsInfo 1→0 (디버그용 TLV 출력 끔)
+3. multiObjBeamForming : enabled 1→0 (다중 피크 분리 기능 끔)
+4. calibDcRangeSig : enabled 0→1 (DC/근거리 보정 기능 켬)
+5. CQSigImgMonitor : numSlices 127→115, timeSliceNumSamples 4→8
+6. cfarFovCfg(Range) : max 19.99→16.18 (최대 검출 거리 축소)
+7. frameCfg : "0 2 32 0 100 1 0"(32루프/100ms, 10fps)로 실험했던 흔적이
+   182행에 주석으로 남아있으나, 현재 활성 값은 "0 2 16 0 1000 1 0"
+   (16루프/1000ms, 1fps)로 되어 있음.
+
+====================================================================
+추가 참고할 점
+====================================================================
+한 가지 참고할 점: cfarFovCfg -1 1 -1 1.00으로 속도 FOV가 ±1m/s로 상당히 좁게 제한되어 있는데, 거의 정지 상태 대상만 검출하도록
+  의도된 설정으로 보입니다 — 의도한 값이 맞는지 확인해보시면 좋을 것 같습니다.
+
