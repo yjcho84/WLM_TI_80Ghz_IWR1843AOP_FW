@@ -166,6 +166,14 @@ static char* gMmwDemoAutoCfgCommands[] =
 };
 */
 
+/* Writable backing store for the multiObjBeamForming entry of
+ * gMmwDemoAutoCfgCommands[] (the other entries are read-only string
+ * literals). MmwDemo_CLIUpdateMultiObjBeamForming() rewrites it at run time
+ * (e.g. on the SPI1 "spiMca<E>b<T.TT>" command) so the table always reflects
+ * the value currently applied to the sensor. */
+#define MMWDEMO_MULTIOBJBF_CMD_MAX_LEN          48
+static char gMmwDemoMultiObjBeamFormingCmd[MMWDEMO_MULTIOBJBF_CMD_MAX_LEN] = "multiObjBeamForming -1 0 0.5";
+
 static char* gMmwDemoAutoCfgCommands[] =
 {
     "sensorStop",
@@ -186,7 +194,7 @@ static char* gMmwDemoAutoCfgCommands[] =
     "cfarCfg -1 0 2 8 4 3 0 15 1",
     "cfarCfg -1 1 0 4 2 3 1 15 1",
     //"multiObjBeamForming -1 1 0.5",
-    "multiObjBeamForming -1 0 0.5", //->26.09.02
+    gMmwDemoMultiObjBeamFormingCmd, //->26.09.02 "multiObjBeamForming -1 0 0.5", updatable over SPI1
     "clutterRemoval -1 0",
     //"calibDcRangeSig -1 0 -5 8 256",
     "calibDcRangeSig -1 1 -5 8 256", //->26.09.02
@@ -863,6 +871,52 @@ static int32_t MmwDemo_CLIMultiObjBeamForming (int32_t argc, char* argv[])
     MmwDemo_CfgUpdate((void *)&cfg, MMWDEMO_MULTIOBJBEAMFORMING_OFFSET,
                       sizeof(cfg), subFrameNum);
 
+    return 0;
+}
+
+/**
+ *  @b Description
+ *  @n
+ *      Run-time update of multiObjBeamForming for all sub-frames, i.e. the
+ *      equivalent of typing "multiObjBeamForming -1 <enabled> <thrScale>"
+ *      on the CLI. The new values are marked pending and are pushed to the
+ *      DPC by MmwDemo_processPendingDynamicCfgCommands() at the next frame
+ *      boundary, so no sensorStop/sensorStart is needed. On success the
+ *      multiObjBeamForming entry of gMmwDemoAutoCfgCommands[] is rewritten
+ *      to match.
+ *
+ *  @param[in] enabledStr   "0" or "1"
+ *  @param[in] thrScaleStr  multiPeakThrsScal as a decimal string, e.g. "1.00"
+ *
+ *  @retval
+ *      Success -   0
+ *  @retval
+ *      Error   -   <0
+ */
+int32_t MmwDemo_CLIUpdateMultiObjBeamForming (char* enabledStr, char* thrScaleStr)
+{
+    char*   argv[4];
+    char    cmdString[MMWDEMO_MULTIOBJBF_CMD_MAX_LEN];
+    int32_t len;
+
+    len = snprintf (cmdString, sizeof(cmdString), "multiObjBeamForming -1 %s %s",
+                    enabledStr, thrScaleStr);
+    if ((len < 0) || (len >= (int32_t)sizeof(cmdString)))
+    {
+        return -1;
+    }
+
+    argv[0] = "multiObjBeamForming";
+    argv[1] = "-1";
+    argv[2] = enabledStr;
+    argv[3] = thrScaleStr;
+
+    if (MmwDemo_CLIMultiObjBeamForming (4, argv) != 0)
+    {
+        return -1;
+    }
+
+    strcpy (gMmwDemoMultiObjBeamFormingCmd, cmdString);
     return 0;
 }
 
