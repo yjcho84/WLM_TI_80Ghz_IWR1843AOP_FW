@@ -719,6 +719,7 @@ MmwDemo_calibData gCalibDataStorage;
  **************************************************************************/
 
 extern void MmwDemo_CLIInit(uint8_t taskPriority);
+extern void MmwDemo_CLIRunAutoConfig(void);
 
 /**************************************************************************
  ************************* Millimeter Wave Demo Functions prototype *************
@@ -3921,15 +3922,36 @@ static void MmwDemo_initTask(UArg arg0, UArg arg1)
      * logging UART and the sensor/CLI bring-up above is unaffected by it. */
     if (MmwDemo_spi1Init() == 0)
     {
+        /* With dmaEnable=0 the SDK's slave transfer busy-waits
+         * (MIBSPI_dataTransfer: while(MIBSPI_checkTGComplete()==0)) until the
+         * master clocks a byte, so the SPI1 task never yields while the bus is
+         * idle and starves every task at or below its priority. This task
+         * (default priority 1) must therefore run above it, or it never gets
+         * back from MmwDemo_spi1WaitBootCfg() to run the auto configuration.
+         * DPM (4) / mmWave ctrl (5) stay above it, so sensorStart still works. */
+        Task_setPri(Task_self(), MMWDEMO_SPI1_TASK_PRIORITY + 1);
+
         Task_Params_init(&taskParams);
         taskParams.priority  = MMWDEMO_SPI1_TASK_PRIORITY;
         taskParams.stackSize = 2*1024;
         Task_create(MmwDemo_spi1SlaveTask, &taskParams, NULL);
+
+        /* frameCfg/lowPower can only be applied at the first sensorStart, so
+         * wait for the nRF to send its saved values (spiMaa####/spiMba#)
+         * before running the auto configuration. On timeout the table
+         * defaults are used. */
+        if (MmwDemo_spi1WaitBootCfg(MMWDEMO_SPI1_BOOT_CFG_TIMEOUT_TICKS) == false)
+        {
+            CLI_write("Warn: SPI1 boot config (frameCfg/lowPower) not received, using defaults\n");
+        }
     }
     else
     {
         System_printf("Error: SPI1 initialization failed, SPI1 slave task not started\n");
     }
+
+    /* Automatically run the sensor configuration sequence (through sensorStart). */
+    MmwDemo_CLIRunAutoConfig();
 
     return;
 }

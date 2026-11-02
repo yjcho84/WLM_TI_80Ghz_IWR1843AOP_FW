@@ -4,6 +4,7 @@ mmwdemo_spi1.oer4f: ../mmwdemo_spi1.c
 mmwdemo_spi1.oer4f: C:/ti/ti-cgt-arm_16.9.6.LTS/include/string.h
 mmwdemo_spi1.oer4f: C:/ti/ti-cgt-arm_16.9.6.LTS/include/linkage.h
 mmwdemo_spi1.oer4f: C:/ti/ti-cgt-arm_16.9.6.LTS/include/stdint.h
+mmwdemo_spi1.oer4f: C:/ti/ti-cgt-arm_16.9.6.LTS/include/stdlib.h
 mmwdemo_spi1.oer4f: C:/ti/xdctools_3_50_08_24_core/packages/xdc/std.h
 mmwdemo_spi1.oer4f: C:/ti/ti-cgt-arm_16.9.6.LTS/include/stdarg.h
 mmwdemo_spi1.oer4f: C:/ti/ti-cgt-arm_16.9.6.LTS/include/stddef.h
@@ -128,6 +129,31 @@ mmwdemo_spi1.oer4f: C:/ti/xdctools_3_50_08_24_core/packages/xdc/runtime/Types.h
 mmwdemo_spi1.oer4f: C:/ti/bios_6_73_01_01/packages/ti/sysbios/interfaces/ITaskSupport.h
 mmwdemo_spi1.oer4f: C:/ti/bios_6_73_01_01/packages/ti/sysbios/knl/Task__epilogue.h
 mmwdemo_spi1.oer4f: C:/ti/bios_6_73_01_01/packages/ti/sysbios/knl/package/Task_SupportProxy.h
+mmwdemo_spi1.oer4f: C:/ti/bios_6_73_01_01/packages/ti/sysbios/knl/Semaphore.h
+mmwdemo_spi1.oer4f: C:/ti/xdctools_3_50_08_24_core/packages/xdc/runtime/Types.h
+mmwdemo_spi1.oer4f: C:/ti/xdctools_3_50_08_24_core/packages/xdc/runtime/IInstance.h
+mmwdemo_spi1.oer4f: C:/ti/bios_6_73_01_01/packages/ti/sysbios/knl/Semaphore__prologue.h
+mmwdemo_spi1.oer4f: C:/ti/xdctools_3_50_08_24_core/packages/xdc/runtime/Diags.h
+mmwdemo_spi1.oer4f: C:/ti/xdctools_3_50_08_24_core/packages/xdc/runtime/Log.h
+mmwdemo_spi1.oer4f: C:/ti/xdctools_3_50_08_24_core/packages/xdc/runtime/Assert.h
+mmwdemo_spi1.oer4f: C:/ti/xdctools_3_50_08_24_core/packages/xdc/runtime/Error.h
+mmwdemo_spi1.oer4f: C:/ti/bios_6_73_01_01/packages/ti/sysbios/knl/Queue.h
+mmwdemo_spi1.oer4f: C:/ti/bios_6_73_01_01/packages/ti/sysbios/knl/Task.h
+mmwdemo_spi1.oer4f: C:/ti/bios_6_73_01_01/packages/ti/sysbios/knl/Clock.h
+mmwdemo_spi1.oer4f: C:/ti/xdctools_3_50_08_24_core/packages/xdc/runtime/IModule.h
+mmwdemo_spi1.oer4f: C:/ti/bios_6_73_01_01/packages/ti/sysbios/knl/Event.h
+mmwdemo_spi1.oer4f: C:/ti/xdctools_3_50_08_24_core/packages/xdc/runtime/Types.h
+mmwdemo_spi1.oer4f: C:/ti/xdctools_3_50_08_24_core/packages/xdc/runtime/IInstance.h
+mmwdemo_spi1.oer4f: C:/ti/bios_6_73_01_01/packages/ti/sysbios/knl/Event__prologue.h
+mmwdemo_spi1.oer4f: C:/ti/xdctools_3_50_08_24_core/packages/xdc/runtime/Assert.h
+mmwdemo_spi1.oer4f: C:/ti/xdctools_3_50_08_24_core/packages/xdc/runtime/Diags.h
+mmwdemo_spi1.oer4f: C:/ti/xdctools_3_50_08_24_core/packages/xdc/runtime/Log.h
+mmwdemo_spi1.oer4f: C:/ti/bios_6_73_01_01/packages/ti/sysbios/knl/Queue.h
+mmwdemo_spi1.oer4f: C:/ti/bios_6_73_01_01/packages/ti/sysbios/knl/Clock.h
+mmwdemo_spi1.oer4f: C:/ti/bios_6_73_01_01/packages/ti/sysbios/knl/Task.h
+mmwdemo_spi1.oer4f: C:/ti/xdctools_3_50_08_24_core/packages/xdc/runtime/IModule.h
+mmwdemo_spi1.oer4f: C:/ti/bios_6_73_01_01/packages/ti/sysbios/knl/Event__epilogue.h
+mmwdemo_spi1.oer4f: C:/ti/bios_6_73_01_01/packages/ti/sysbios/knl/Semaphore__epilogue.h
 mmwdemo_spi1.oer4f: C:/ti/mmwave_sdk_03_05_00_04/packages/ti/drivers/pinmux/pinmux.h
 mmwdemo_spi1.oer4f: C:/ti/ti-cgt-arm_16.9.6.LTS/include/stddef.h
 mmwdemo_spi1.oer4f: C:/ti/mmwave_sdk_03_05_00_04/packages/ti/common/mmwave_error.h
@@ -168,6 +194,8 @@ C:/ti/ti-cgt-arm_16.9.6.LTS/include/string.h:
 C:/ti/ti-cgt-arm_16.9.6.LTS/include/linkage.h:
 
 C:/ti/ti-cgt-arm_16.9.6.LTS/include/stdint.h:
+
+C:/ti/ti-cgt-arm_16.9.6.LTS/include/stdlib.h:
 
 C:/ti/xdctools_3_50_08_24_core/packages/xdc/std.h:
 
@@ -416,6 +444,56 @@ C:/ti/bios_6_73_01_01/packages/ti/sysbios/interfaces/ITaskSupport.h:
 C:/ti/bios_6_73_01_01/packages/ti/sysbios/knl/Task__epilogue.h:
 
 C:/ti/bios_6_73_01_01/packages/ti/sysbios/knl/package/Task_SupportProxy.h:
+
+C:/ti/bios_6_73_01_01/packages/ti/sysbios/knl/Semaphore.h:
+
+C:/ti/xdctools_3_50_08_24_core/packages/xdc/runtime/Types.h:
+
+C:/ti/xdctools_3_50_08_24_core/packages/xdc/runtime/IInstance.h:
+
+C:/ti/bios_6_73_01_01/packages/ti/sysbios/knl/Semaphore__prologue.h:
+
+C:/ti/xdctools_3_50_08_24_core/packages/xdc/runtime/Diags.h:
+
+C:/ti/xdctools_3_50_08_24_core/packages/xdc/runtime/Log.h:
+
+C:/ti/xdctools_3_50_08_24_core/packages/xdc/runtime/Assert.h:
+
+C:/ti/xdctools_3_50_08_24_core/packages/xdc/runtime/Error.h:
+
+C:/ti/bios_6_73_01_01/packages/ti/sysbios/knl/Queue.h:
+
+C:/ti/bios_6_73_01_01/packages/ti/sysbios/knl/Task.h:
+
+C:/ti/bios_6_73_01_01/packages/ti/sysbios/knl/Clock.h:
+
+C:/ti/xdctools_3_50_08_24_core/packages/xdc/runtime/IModule.h:
+
+C:/ti/bios_6_73_01_01/packages/ti/sysbios/knl/Event.h:
+
+C:/ti/xdctools_3_50_08_24_core/packages/xdc/runtime/Types.h:
+
+C:/ti/xdctools_3_50_08_24_core/packages/xdc/runtime/IInstance.h:
+
+C:/ti/bios_6_73_01_01/packages/ti/sysbios/knl/Event__prologue.h:
+
+C:/ti/xdctools_3_50_08_24_core/packages/xdc/runtime/Assert.h:
+
+C:/ti/xdctools_3_50_08_24_core/packages/xdc/runtime/Diags.h:
+
+C:/ti/xdctools_3_50_08_24_core/packages/xdc/runtime/Log.h:
+
+C:/ti/bios_6_73_01_01/packages/ti/sysbios/knl/Queue.h:
+
+C:/ti/bios_6_73_01_01/packages/ti/sysbios/knl/Clock.h:
+
+C:/ti/bios_6_73_01_01/packages/ti/sysbios/knl/Task.h:
+
+C:/ti/xdctools_3_50_08_24_core/packages/xdc/runtime/IModule.h:
+
+C:/ti/bios_6_73_01_01/packages/ti/sysbios/knl/Event__epilogue.h:
+
+C:/ti/bios_6_73_01_01/packages/ti/sysbios/knl/Semaphore__epilogue.h:
 
 C:/ti/mmwave_sdk_03_05_00_04/packages/ti/drivers/pinmux/pinmux.h:
 

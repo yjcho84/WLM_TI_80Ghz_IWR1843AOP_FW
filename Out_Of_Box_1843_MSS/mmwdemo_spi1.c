@@ -28,10 +28,12 @@
 /* Standard Include Files. */
 #include <string.h>
 #include <stdint.h>
+#include <stdlib.h>
 
 /* BIOS/XDC Include Files. */
 #include <xdc/std.h>
 #include <ti/sysbios/knl/Task.h>
+#include <ti/sysbios/knl/Semaphore.h>
 
 /* mmWave SDK Include Files. */
 #include <ti/drivers/pinmux/pinmux.h>
@@ -42,10 +44,6 @@
 /* Local Include Files. */
 #include "mmwdemo_spi1.h"
 
-#if (MMWDEMO_SPI1_MSG_LEN % MMWDEMO_SPI1_CHUNK_LEN) != 0
-#error MMWDEMO_SPI1_MSG_LEN must be a multiple of MMWDEMO_SPI1_CHUNK_LEN
-#endif
-
 #if (MMWDEMO_SPI1_RESP_LEN % MMWDEMO_SPI1_CHUNK_LEN) != 0
 #error MMWDEMO_SPI1_RESP_LEN must be a multiple of MMWDEMO_SPI1_CHUNK_LEN
 #endif
@@ -54,55 +52,86 @@
  *************************** Local Definitions ***************************
  **************************************************************************/
 
-/*! @brief Fixed command pattern that the SPI master must send to trigger a response. */
-static const uint8_t gMmwDemoSpi1ExpectedCmd[MMWDEMO_SPI1_MSG_LEN] =
+/*! @brief ASCII commands from the SPI master. All share the "spiM" prefix and
+ *         are told apart by byte 4. '#' in a pattern matches any ASCII digit.
+ *          - "spiMca<E>b<T.TT>", e.g. "spiMca1b1.00": sets
+ *            "multiObjBeamForming -1 <E> <T.TT>" at run time (E: '0'/'1').
+ *          - "spiMaa<PPPP>", e.g. "spiMaa0300": frameCfg periodicity in ms
+ *            (100 ~ 1000, always 4 digits), power-up only.
+ *          - "spiMba<M>", e.g. "spiMba0": lowPower adcMode (0/1), power-up only.
+ *          Run-time updates (applied at the next frame, like spiMca):
+ *          - "spiMda<E>": "clutterRemoval -1 <E>"
+ *          - "spiMea<E>": "calibDcRangeSig -1 <E> -5 8 256"
+ *          - "spiMfa<E>": "extendedMaxVelocity -1 <E>"
+ *          - "spiMga<AA>b<BB>c<CC>d<DD>", e.g. "spiMga45b45c30d30":
+ *            "aoaFovCfg -1 -<AA> <BB> -<CC> <DD>" (degrees, 2 digits each,
+ *            no '-' sign on the minimums)
+ *          - "spiMha<RR.RR>", e.g. "spiMha01.25": "cfarFovCfg -1 0 0 <RR.RR>"
+ *            (max range 01.00 ~ 20.00 m, always 5 chars)
+ *          - "spiMia<A.A>b<B.B>", e.g. "spiMia1.0b2.5": "cfarFovCfg -1 1 -<A.A> <B.B>"
+ *            (velocity 1.0 ~ 2.5 m/s, no '-' sign on the minimum) */
+#define MMWDEMO_SPI1_CMD_PREFIX_LEN     4U
+#define MMWDEMO_SPI1_CMD_MAX_LEN        17U
+
+#define MMWDEMO_SPI1_CMD_BF             0
+#define MMWDEMO_SPI1_CMD_FRAMECFG       1
+#define MMWDEMO_SPI1_CMD_LOWPOWER       2
+#define MMWDEMO_SPI1_CMD_CLUTTER        3
+#define MMWDEMO_SPI1_CMD_CALIBDC        4
+#define MMWDEMO_SPI1_CMD_EXTMAXVEL      5
+#define MMWDEMO_SPI1_CMD_AOAFOV         6
+#define MMWDEMO_SPI1_CMD_FOVRANGE       7
+#define MMWDEMO_SPI1_CMD_FOVDOPPLER     8
+#define MMWDEMO_SPI1_NUM_CMDS           9U
+static const char* const gMmwDemoSpi1CmdPatterns[MMWDEMO_SPI1_NUM_CMDS] =
 {
-    0xA5U,
-    0x5AU,
-    0x01U,
-    0x02U
+    "spiMca#b#.##",         /* MMWDEMO_SPI1_CMD_BF */
+    "spiMaa####",           /* MMWDEMO_SPI1_CMD_FRAMECFG */
+    "spiMba#",              /* MMWDEMO_SPI1_CMD_LOWPOWER */
+    "spiMda#",              /* MMWDEMO_SPI1_CMD_CLUTTER */
+    "spiMea#",              /* MMWDEMO_SPI1_CMD_CALIBDC */
+    "spiMfa#",              /* MMWDEMO_SPI1_CMD_EXTMAXVEL */
+    "spiMga##b##c##d##",    /* MMWDEMO_SPI1_CMD_AOAFOV */
+    "spiMha##.##",          /* MMWDEMO_SPI1_CMD_FOVRANGE */
+    "spiMia#.#b#.#"         /* MMWDEMO_SPI1_CMD_FOVDOPPLER */
 };
 
-/*! @brief Second fixed command pattern: ASCII string "abAB". */
-static const uint8_t gMmwDemoSpi1AbCmd[MMWDEMO_SPI1_MSG_LEN] =
-{
-    0x61U,  /* 'a' */
-    0x62U,  /* 'b' */
-    0x41U,  /* 'A' */
-    0x42U   /* 'B' */
-};
-
-/*! @brief Fixed response sent back once gMmwDemoSpi1AbCmd is recognized.
- *         Thermometer code 2 (see MMWDEMO_SPI1_RESP_LEN), so it stays
- *         distinguishable from the default code-1 response despite the
- *         MISO falling-edge fault. */
-static const uint8_t gMmwDemoSpi1AbResponse[MMWDEMO_SPI1_RESP_LEN] =
-{
-    0xFFU,
-    0xFFU,
-    0x00U,
-    0x00U
-};
-
-/*! @brief Third command: ASCII "spiMca<E>b<T.TT>", e.g. "spiMca1b1.00",
- *         sets "multiObjBeamForming -1 <E> <T.TT>" at run time. '#' in the
- *         pattern matches any ASCII digit; E must additionally be '0'/'1'. */
-#define MMWDEMO_SPI1_BF_CMD_LEN         12U
 #define MMWDEMO_SPI1_BF_ENABLED_IDX     6U
 #define MMWDEMO_SPI1_BF_THR_IDX         8U
 #define MMWDEMO_SPI1_BF_THR_LEN         4U
-static const char gMmwDemoSpi1BfCmdPattern[MMWDEMO_SPI1_BF_CMD_LEN + 1U] = "spiMca#b#.##";
+#define MMWDEMO_SPI1_FRAMECFG_VAL_IDX   6U
+#define MMWDEMO_SPI1_FRAMECFG_VAL_LEN   4U
+#define MMWDEMO_SPI1_LOWPOWER_VAL_IDX   6U
+#define MMWDEMO_SPI1_ONOFF_VAL_IDX      6U      /* spiMda / spiMea / spiMfa */
+#define MMWDEMO_SPI1_AOAFOV_MINAZ_IDX   6U      /* spiMga<AA>b<BB>c<CC>d<DD> */
+#define MMWDEMO_SPI1_AOAFOV_MAXAZ_IDX   9U
+#define MMWDEMO_SPI1_AOAFOV_MINEL_IDX   12U
+#define MMWDEMO_SPI1_AOAFOV_MAXEL_IDX   15U
+#define MMWDEMO_SPI1_FOVRANGE_IDX       6U      /* spiMha<RR.RR> */
+#define MMWDEMO_SPI1_FOVDOP_MIN_IDX     6U      /* spiMia<A.A>b<B.B> */
+#define MMWDEMO_SPI1_FOVDOP_MAX_IDX     10U
 
-/*! @brief Responses to the "spiMca.." command: thermometer code 3 when the
+/* Value of the 2 ASCII digits at p, e.g. "45" -> 45 (matcher guarantees digits). */
+#define MMWDEMO_SPI1_DIGITS2(p)         ((uint32_t)(((p)[0] - '0') * 10 + ((p)[1] - '0')))
+
+/*! @brief State of the byte-by-byte command matcher. */
+typedef struct MmwDemo_Spi1CmdMatcher_t
+{
+    uint8_t     matchLen;                       /* pattern bytes matched so far */
+    int32_t     cmdIdx;                         /* pattern selected by byte 4, -1 if none */
+    char        rxBuf[MMWDEMO_SPI1_CMD_MAX_LEN];/* captured command bytes */
+} MmwDemo_Spi1CmdMatcher;
+
+/*! @brief Responses to the "spiM.." commands: thermometer code 3 when the
  *         new values were accepted, code 0 when they were rejected. */
-static const uint8_t gMmwDemoSpi1BfOkResponse[MMWDEMO_SPI1_RESP_LEN] =
+static const uint8_t gMmwDemoSpi1OkResponse[MMWDEMO_SPI1_RESP_LEN] =
 {
     0xFFU,
     0xFFU,
     0xFFU,
     0x00U
 };
-static const uint8_t gMmwDemoSpi1BfErrResponse[MMWDEMO_SPI1_RESP_LEN] =
+static const uint8_t gMmwDemoSpi1ErrResponse[MMWDEMO_SPI1_RESP_LEN] =
 {
     0x00U,
     0x00U,
@@ -112,12 +141,15 @@ static const uint8_t gMmwDemoSpi1BfErrResponse[MMWDEMO_SPI1_RESP_LEN] =
 
 /* Defined in mmw_cli.c */
 extern int32_t MmwDemo_CLIUpdateMultiObjBeamForming (char* enabledStr, char* thrScaleStr);
-
-/*! @brief Response sent back once the expected command is recognized.
- *         Thermometer/unary-encoded by @ref MmwDemo_spi1SetResponseCode -
- *         see MMWDEMO_SPI1_RESP_LEN for the full rationale. Mutable (not
- *         const) since the code can change between command matches. */
-static uint8_t gMmwDemoSpi1FixedResponse[MMWDEMO_SPI1_RESP_LEN];
+extern int32_t MmwDemo_CLIUpdateFramePeriodicity (uint32_t periodMs);
+extern int32_t MmwDemo_CLIUpdateLowPower (uint32_t adcMode);
+extern int32_t MmwDemo_CLIUpdateClutterRemoval (uint32_t enabled);
+extern int32_t MmwDemo_CLIUpdateCalibDcRangeSig (uint32_t enabled);
+extern int32_t MmwDemo_CLIUpdateExtMaxVelocity (uint32_t enabled);
+extern int32_t MmwDemo_CLIUpdateAoaFov (uint32_t minAzimMag, uint32_t maxAzim,
+                                        uint32_t minElevMag, uint32_t maxElev);
+extern int32_t MmwDemo_CLIUpdateCfarFovRange (uint32_t maxX100);
+extern int32_t MmwDemo_CLIUpdateCfarFovDoppler (uint32_t minMagX10, uint32_t maxX10);
 
 /**************************************************************************
  *************************** Global Definitions ***************************
@@ -125,6 +157,13 @@ static uint8_t gMmwDemoSpi1FixedResponse[MMWDEMO_SPI1_RESP_LEN];
 
 /*! @brief SPI1 (SPIA) driver handle, opened by @ref MmwDemo_spi1Init */
 static SPI_Handle   gMmwDemoSpi1Handle = NULL;
+
+/*! @brief Posted once both power-up settings (frameCfg, lowPower) arrived,
+ *         see @ref MmwDemo_spi1WaitBootCfg. Created by @ref MmwDemo_spi1Init */
+static Semaphore_Handle gMmwDemoSpi1BootCfgSem = NULL;
+static bool         gMmwDemoSpi1GotFrameCfg = false;
+static bool         gMmwDemoSpi1GotLowPower = false;
+static bool         gMmwDemoSpi1BootCfgPosted = false;
 
 /**
  *  @b Description
@@ -209,42 +248,24 @@ int32_t MmwDemo_spi1Init(void)
 
     CLI_write("Debug: SPI1 (SPIA) opened in SLAVE mode on D2(CLK)/C2(CS)/F2(MOSI)/D1(MISO)\n");
 
-    /* Default response code until application code calls
-     * MmwDemo_spi1SetResponseCode() with something else - 1 (i.e. a single
-     * leading 0xFF byte) reproduces the plain ACK behavior this was before
-     * multi-code support was added. */
-    MmwDemo_spi1SetResponseCode(1U);
+    gMmwDemoSpi1BootCfgSem = Semaphore_create(0, NULL, NULL);
+    if (gMmwDemoSpi1BootCfgSem == NULL)
+    {
+        CLI_write("Error: MmwDemo_spi1Init - boot config semaphore create failed\n");
+        return -1;
+    }
 
     return 0;
 }
 
-/**
- *  @b Description
- *  @n
- *      Thermometer/unary-encodes `code` into gMmwDemoSpi1FixedResponse: the
- *      first `code` bytes become 0xFF, the rest 0x00. See
- *      MMWDEMO_SPI1_RESP_LEN for why this encoding is used instead of an
- *      arbitrary bit pattern.
- *
- *  @param[in] code     Response code to send next, in [0, MMWDEMO_SPI1_RESP_LEN];
- *                       clamped if out of range.
- *
- *  @retval
- *      Not Applicable.
- */
-void MmwDemo_spi1SetResponseCode(uint8_t code)
+bool MmwDemo_spi1WaitBootCfg(uint32_t timeoutTicks)
 {
-    uint32_t i;
-
-    if (code > MMWDEMO_SPI1_RESP_LEN)
+    if (gMmwDemoSpi1BootCfgSem == NULL)
     {
-        code = MMWDEMO_SPI1_RESP_LEN;
+        return false;
     }
 
-    for (i = 0U; i < MMWDEMO_SPI1_RESP_LEN; i++)
-    {
-        gMmwDemoSpi1FixedResponse[i] = (i < code) ? 0xFFU : 0x00U;
-    }
+    return (Semaphore_pend(gMmwDemoSpi1BootCfgSem, timeoutTicks) == TRUE);
 }
 
 /**
@@ -299,94 +320,105 @@ static bool MmwDemo_spi1TransferChunks(SPI_Handle handle, const uint8_t *txBuf, 
 /**
  *  @b Description
  *  @n
- *      Advances one byte-by-byte command matcher by one received byte. On a
- *      mismatch the byte is re-tested against byte 0 of the pattern instead
- *      of being discarded, so the matcher re-synchronizes on any phase
- *      offset. Several matchers can be fed the same byte stream in parallel.
+ *      Advances the byte-by-byte matcher for gMmwDemoSpi1CmdPatterns[] by one
+ *      received byte: the shared "spiM" prefix is matched first, byte 4 then
+ *      selects the pattern. '#' matches any digit, and every matched byte is
+ *      captured into rxBuf so the values can be extracted. On a mismatch the
+ *      byte is re-tested against byte 0 instead of being discarded, so the
+ *      matcher re-synchronizes on any phase offset.
  *
- *  @param[in]     cmd       Command pattern, MMWDEMO_SPI1_MSG_LEN bytes
- *  @param[in,out] matchLen  Number of pattern bytes matched so far
+ *      A single matcher is used for all commands on purpose: parallel
+ *      matchers would all follow the shared prefix, and the losers' resync
+ *      CLI_write would stall this task long enough to drop the rest of the
+ *      winning command.
+ *
+ *  @param[in,out] matcher   Matcher state
  *  @param[in]     rxByte    Byte just received from the master
  *
  *  @retval
- *      true    - the full pattern has just been matched (matchLen reset to 0)
+ *      >=0     - MMWDEMO_SPI1_CMD_xxx just fully matched (state reset)
  *  @retval
- *      false   - pattern not (yet) complete
+ *      -1      - no command (yet) complete
  */
-static bool MmwDemo_spi1MatchStep(const uint8_t *cmd, uint8_t *matchLen, uint8_t rxByte)
+static int32_t MmwDemo_spi1CmdMatchStep(MmwDemo_Spi1CmdMatcher *matcher, uint8_t rxByte)
 {
-    if (rxByte == cmd[*matchLen])
+    const char* pattern = NULL;
+    bool        isMatch = false;
+    uint32_t    i;
+    char        expected;
+
+    if (matcher->matchLen < MMWDEMO_SPI1_CMD_PREFIX_LEN)
     {
-        (*matchLen)++;
-        if (*matchLen == MMWDEMO_SPI1_MSG_LEN)
+        pattern = gMmwDemoSpi1CmdPatterns[0];
+    }
+    else
+    {
+        if (matcher->matchLen == MMWDEMO_SPI1_CMD_PREFIX_LEN)
         {
-            *matchLen = 0U;
-            return true;
+            matcher->cmdIdx = -1;
+            for (i = 0U; i < MMWDEMO_SPI1_NUM_CMDS; i++)
+            {
+                if (rxByte == (uint8_t)gMmwDemoSpi1CmdPatterns[i][MMWDEMO_SPI1_CMD_PREFIX_LEN])
+                {
+                    matcher->cmdIdx = (int32_t)i;
+                    break;
+                }
+            }
         }
-        return false;
+        if (matcher->cmdIdx >= 0)
+        {
+            pattern = gMmwDemoSpi1CmdPatterns[matcher->cmdIdx];
+        }
     }
 
-    if (*matchLen > 0U)
+    if (pattern != NULL)
     {
-        /* Only log when a partial match breaks - logging every byte
-         * that isn't byte 0 of the command would flood the console
-         * with the idle/dummy traffic between commands. */
-        CLI_write("Warn: SPI1 cmd %02x.. resync (had %d/%d bytes, next byte was %02x)\n",
-                  cmd[0], (int32_t)*matchLen, (int32_t)MMWDEMO_SPI1_MSG_LEN, rxByte);
+        expected = pattern[matcher->matchLen];
+        isMatch  = (expected == '#') ? ((rxByte >= (uint8_t)'0') && (rxByte <= (uint8_t)'9'))
+                                     : (rxByte == (uint8_t)expected);
     }
 
-    /* This byte may itself be byte 0 of a new command - re-test it
-     * against the start of the pattern instead of discarding it. */
-    *matchLen = (rxByte == cmd[0]) ? 1U : 0U;
-    return false;
+    if (isMatch)
+    {
+        matcher->rxBuf[matcher->matchLen] = (char)rxByte;
+        matcher->matchLen++;
+        if (pattern[matcher->matchLen] == '\0')
+        {
+            matcher->matchLen = 0U;
+            return matcher->cmdIdx;
+        }
+        return -1;
+    }
+
+    if (matcher->matchLen > 0U)
+    {
+        CLI_write("Warn: SPI1 cmd spiM.. resync (had %d bytes, next byte was %02x)\n",
+                  (int32_t)matcher->matchLen, rxByte);
+    }
+
+    matcher->matchLen = (rxByte == (uint8_t)gMmwDemoSpi1CmdPatterns[0][0]) ? 1U : 0U;
+    if (matcher->matchLen == 1U)
+    {
+        matcher->rxBuf[0] = (char)rxByte;
+    }
+    return -1;
 }
 
 /**
  *  @b Description
  *  @n
- *      Same as @ref MmwDemo_spi1MatchStep, but for the ASCII
- *      gMmwDemoSpi1BfCmdPattern: '#' matches any digit, and every matched
- *      byte is captured into rxBuf so the values can be extracted.
- *
- *  @param[in,out] matchLen  Number of pattern bytes matched so far
- *  @param[in]     rxByte    Byte just received from the master
- *  @param[out]    rxBuf     MMWDEMO_SPI1_BF_CMD_LEN bytes, the captured command
+ *      Posts gMmwDemoSpi1BootCfgSem once both power-up settings arrived.
  *
  *  @retval
- *      true    - the full command has just been matched (matchLen reset to 0)
- *  @retval
- *      false   - command not (yet) complete
+ *      Not Applicable.
  */
-static bool MmwDemo_spi1BfMatchStep(uint8_t *matchLen, uint8_t rxByte, char *rxBuf)
+static void MmwDemo_spi1CheckBootCfgDone(void)
 {
-    char expected = gMmwDemoSpi1BfCmdPattern[*matchLen];
-    bool isMatch  = (expected == '#') ? ((rxByte >= (uint8_t)'0') && (rxByte <= (uint8_t)'9'))
-                                      : (rxByte == (uint8_t)expected);
-
-    if (isMatch)
+    if (gMmwDemoSpi1GotFrameCfg && gMmwDemoSpi1GotLowPower && !gMmwDemoSpi1BootCfgPosted)
     {
-        rxBuf[*matchLen] = (char)rxByte;
-        (*matchLen)++;
-        if (*matchLen == MMWDEMO_SPI1_BF_CMD_LEN)
-        {
-            *matchLen = 0U;
-            return true;
-        }
-        return false;
+        gMmwDemoSpi1BootCfgPosted = true;
+        Semaphore_post(gMmwDemoSpi1BootCfgSem);
     }
-
-    if (*matchLen > 0U)
-    {
-        CLI_write("Warn: SPI1 cmd spiMc.. resync (had %d/%d bytes, next byte was %02x)\n",
-                  (int32_t)*matchLen, (int32_t)MMWDEMO_SPI1_BF_CMD_LEN, rxByte);
-    }
-
-    *matchLen = (rxByte == (uint8_t)gMmwDemoSpi1BfCmdPattern[0]) ? 1U : 0U;
-    if (*matchLen == 1U)
-    {
-        rxBuf[0] = (char)rxByte;
-    }
-    return false;
 }
 
 /**
@@ -394,11 +426,11 @@ static bool MmwDemo_spi1BfMatchStep(uint8_t *matchLen, uint8_t rxByte, char *rxB
  *  @n
  *      Applies a fully matched "spiMca<E>b<T.TT>" command as
  *      "multiObjBeamForming -1 <E> <T.TT>" and replies with
- *      gMmwDemoSpi1BfOkResponse / gMmwDemoSpi1BfErrResponse. The response is
+ *      gMmwDemoSpi1OkResponse / gMmwDemoSpi1ErrResponse. The response is
  *      sent before anything is logged, since CLI_write is slow enough for
  *      the master's response clocks to arrive before it returns.
  *
- *  @param[in] rxBuf      The captured MMWDEMO_SPI1_BF_CMD_LEN-byte command
+ *  @param[in] rxBuf      The captured command
  *  @param[in] respRxBuf  Scratch buffer for the MISO response transfer
  *
  *  @retval
@@ -421,7 +453,7 @@ static void MmwDemo_spi1HandleBfCmd(const char *rxBuf, uint8_t *respRxBuf)
     }
 
     (void)MmwDemo_spi1TransferChunks(gMmwDemoSpi1Handle,
-                                     (status == 0) ? gMmwDemoSpi1BfOkResponse : gMmwDemoSpi1BfErrResponse,
+                                     (status == 0) ? gMmwDemoSpi1OkResponse : gMmwDemoSpi1ErrResponse,
                                      respRxBuf, MMWDEMO_SPI1_RESP_LEN);
 
     if (status == 0)
@@ -439,28 +471,190 @@ static void MmwDemo_spi1HandleBfCmd(const char *rxBuf, uint8_t *respRxBuf)
 /**
  *  @b Description
  *  @n
- *      Example SYSBIOS task body: continuously scans, one byte at a time,
- *      for the fixed command pattern from the SPI master and replies with
- *      the fixed response.
+ *      Handles a fully matched "spiMaa<PPPP>" (frameCfg periodicity) or
+ *      "spiMba<M>" (lowPower adcMode) command. Both only take effect before
+ *      the power-up auto configuration runs; a valid value received later is
+ *      still acknowledged (so the nRF stops retrying) but ignored. Response
+ *      first, logging after - see @ref MmwDemo_spi1HandleBfCmd.
  *
- *      Phase 1 used to capture a fixed MMWDEMO_SPI1_MSG_LEN-byte window and
- *      memcmp() it as a whole, but that window can end up permanently
- *      phase-shifted against the master's byte stream (there is no
- *      CS-independent handshake to establish byte-0 alignment at boot), and
- *      once shifted it can never self-correct because it always advances by
- *      exactly MMWDEMO_SPI1_MSG_LEN bytes - so it keeps re-sampling the same
- *      wrong slice of the master's repeating command+dummy stream forever.
+ *  @param[in] cmdIdx     MMWDEMO_SPI1_CMD_FRAMECFG or MMWDEMO_SPI1_CMD_LOWPOWER
+ *  @param[in] rxBuf      The captured command
+ *  @param[in] respRxBuf  Scratch buffer for the MISO response transfer
+ *
+ *  @retval
+ *      Not Applicable.
+ */
+static void MmwDemo_spi1HandleBootCfgCmd(int32_t cmdIdx, const char *rxBuf, uint8_t *respRxBuf)
+{
+    char        valStr[MMWDEMO_SPI1_FRAMECFG_VAL_LEN + 1U];
+    const char* name;
+    int32_t     status;
+
+    if (cmdIdx == MMWDEMO_SPI1_CMD_FRAMECFG)
+    {
+        name = "frameCfg periodicity";
+        memcpy(valStr, &rxBuf[MMWDEMO_SPI1_FRAMECFG_VAL_IDX], MMWDEMO_SPI1_FRAMECFG_VAL_LEN);
+        valStr[MMWDEMO_SPI1_FRAMECFG_VAL_LEN] = '\0';
+        status = MmwDemo_CLIUpdateFramePeriodicity((uint32_t)atoi(valStr));
+    }
+    else
+    {
+        name = "lowPower adcMode";
+        valStr[0] = rxBuf[MMWDEMO_SPI1_LOWPOWER_VAL_IDX];
+        valStr[1] = '\0';
+        status = MmwDemo_CLIUpdateLowPower((uint32_t)atoi(valStr));
+    }
+
+    (void)MmwDemo_spi1TransferChunks(gMmwDemoSpi1Handle,
+                                     (status >= 0) ? gMmwDemoSpi1OkResponse : gMmwDemoSpi1ErrResponse,
+                                     respRxBuf, MMWDEMO_SPI1_RESP_LEN);
+
+    if (status == 0)
+    {
+        if (cmdIdx == MMWDEMO_SPI1_CMD_FRAMECFG)
+        {
+            gMmwDemoSpi1GotFrameCfg = true;
+        }
+        else
+        {
+            gMmwDemoSpi1GotLowPower = true;
+        }
+        MmwDemo_spi1CheckBootCfgDone();
+        CLI_write("SPI1: %s %s (applied at sensor start)\n", name, valStr);
+    }
+    else if (status > 0)
+    {
+        CLI_write("SPI1: %s %s ignored, sensor already configured\n", name, valStr);
+    }
+    else
+    {
+        CLI_write("Error: SPI1 %s %s rejected\n", name, valStr);
+    }
+}
+
+/**
+ *  @b Description
+ *  @n
+ *      Handles a fully matched run-time command, "spiMda#" ~ "spiMia#.#b#.#"
+ *      (see gMmwDemoSpi1CmdPatterns): the values are applied at the next
+ *      frame, like @ref MmwDemo_spi1HandleBfCmd. Response first, logging
+ *      after.
+ *
+ *  @param[in] cmdIdx     MMWDEMO_SPI1_CMD_CLUTTER ~ MMWDEMO_SPI1_CMD_FOVDOPPLER
+ *  @param[in] rxBuf      The captured command
+ *  @param[in] respRxBuf  Scratch buffer for the MISO response transfer
+ *
+ *  @retval
+ *      Not Applicable.
+ */
+static void MmwDemo_spi1HandleDynCmd(int32_t cmdIdx, const char *rxBuf, uint8_t *respRxBuf)
+{
+    uint32_t    onOff = (uint32_t)(rxBuf[MMWDEMO_SPI1_ONOFF_VAL_IDX] - '0');
+    uint32_t    v0 = 0U;
+    uint32_t    v1 = 0U;
+    uint32_t    v2 = 0U;
+    uint32_t    v3 = 0U;
+    int32_t     status;
+
+    switch (cmdIdx)
+    {
+        case MMWDEMO_SPI1_CMD_CLUTTER:
+            status = MmwDemo_CLIUpdateClutterRemoval(onOff);
+            break;
+        case MMWDEMO_SPI1_CMD_CALIBDC:
+            status = MmwDemo_CLIUpdateCalibDcRangeSig(onOff);
+            break;
+        case MMWDEMO_SPI1_CMD_EXTMAXVEL:
+            status = MmwDemo_CLIUpdateExtMaxVelocity(onOff);
+            break;
+        case MMWDEMO_SPI1_CMD_AOAFOV:
+            v0 = MMWDEMO_SPI1_DIGITS2(&rxBuf[MMWDEMO_SPI1_AOAFOV_MINAZ_IDX]);
+            v1 = MMWDEMO_SPI1_DIGITS2(&rxBuf[MMWDEMO_SPI1_AOAFOV_MAXAZ_IDX]);
+            v2 = MMWDEMO_SPI1_DIGITS2(&rxBuf[MMWDEMO_SPI1_AOAFOV_MINEL_IDX]);
+            v3 = MMWDEMO_SPI1_DIGITS2(&rxBuf[MMWDEMO_SPI1_AOAFOV_MAXEL_IDX]);
+            status = MmwDemo_CLIUpdateAoaFov(v0, v1, v2, v3);
+            break;
+        case MMWDEMO_SPI1_CMD_FOVRANGE:
+            /* "RR.RR" -> RRRR (meters * 100) */
+            v0 = MMWDEMO_SPI1_DIGITS2(&rxBuf[MMWDEMO_SPI1_FOVRANGE_IDX]) * 100U +
+                 MMWDEMO_SPI1_DIGITS2(&rxBuf[MMWDEMO_SPI1_FOVRANGE_IDX + 3U]);
+            status = MmwDemo_CLIUpdateCfarFovRange(v0);
+            break;
+        case MMWDEMO_SPI1_CMD_FOVDOPPLER:
+            /* "A.A" -> AA (m/s * 10) */
+            v0 = (uint32_t)(rxBuf[MMWDEMO_SPI1_FOVDOP_MIN_IDX] - '0') * 10U +
+                 (uint32_t)(rxBuf[MMWDEMO_SPI1_FOVDOP_MIN_IDX + 2U] - '0');
+            v1 = (uint32_t)(rxBuf[MMWDEMO_SPI1_FOVDOP_MAX_IDX] - '0') * 10U +
+                 (uint32_t)(rxBuf[MMWDEMO_SPI1_FOVDOP_MAX_IDX + 2U] - '0');
+            status = MmwDemo_CLIUpdateCfarFovDoppler(v0, v1);
+            break;
+        default:
+            status = -1;
+            break;
+    }
+
+    (void)MmwDemo_spi1TransferChunks(gMmwDemoSpi1Handle,
+                                     (status == 0) ? gMmwDemoSpi1OkResponse : gMmwDemoSpi1ErrResponse,
+                                     respRxBuf, MMWDEMO_SPI1_RESP_LEN);
+
+    if (status != 0)
+    {
+        char    cmdStr[MMWDEMO_SPI1_CMD_MAX_LEN + 1U];
+        size_t  cmdLen = strlen(gMmwDemoSpi1CmdPatterns[cmdIdx]);
+
+        memcpy(cmdStr, rxBuf, cmdLen);
+        cmdStr[cmdLen] = '\0';
+        CLI_write("Error: SPI1 %s rejected\n", cmdStr);
+        return;
+    }
+
+    switch (cmdIdx)
+    {
+        case MMWDEMO_SPI1_CMD_CLUTTER:
+            CLI_write("SPI1: clutterRemoval -1 %d (applied at next frame)\n", (int32_t)onOff);
+            break;
+        case MMWDEMO_SPI1_CMD_CALIBDC:
+            CLI_write("SPI1: calibDcRangeSig -1 %d -5 8 256 (applied at next frame)\n", (int32_t)onOff);
+            break;
+        case MMWDEMO_SPI1_CMD_EXTMAXVEL:
+            CLI_write("SPI1: extendedMaxVelocity -1 %d (applied at next frame)\n", (int32_t)onOff);
+            break;
+        case MMWDEMO_SPI1_CMD_AOAFOV:
+            CLI_write("SPI1: aoaFovCfg -1 -%d %d -%d %d (applied at next frame)\n",
+                      (int32_t)v0, (int32_t)v1, (int32_t)v2, (int32_t)v3);
+            break;
+        case MMWDEMO_SPI1_CMD_FOVRANGE:
+            CLI_write("SPI1: cfarFovCfg -1 0 0 %d.%02d (applied at next frame)\n",
+                      (int32_t)(v0 / 100U), (int32_t)(v0 % 100U));
+            break;
+        default: /* MMWDEMO_SPI1_CMD_FOVDOPPLER */
+            CLI_write("SPI1: cfarFovCfg -1 1 -%d.%d %d.%d (applied at next frame)\n",
+                      (int32_t)(v0 / 10U), (int32_t)(v0 % 10U),
+                      (int32_t)(v1 / 10U), (int32_t)(v1 % 10U));
+            break;
+    }
+}
+
+/**
+ *  @b Description
+ *  @n
+ *      Example SYSBIOS task body: continuously scans, one byte at a time,
+ *      for the "spiM.." commands (see gMmwDemoSpi1CmdPatterns) from the SPI
+ *      master and replies with their response.
+ *
  *      Scanning byte by byte and re-synchronizing on any mismatch (like the
- *      nRF side's UART1 magic-word parser) is robust to any phase offset.
- *      This requires MMWDEMO_SPI1_CHUNK_LEN == 1 (CS toggling every byte) so
- *      that each SPI_transfer() below corresponds to exactly one byte.
+ *      nRF side's UART1 magic-word parser) is robust to any phase offset
+ *      (there is no CS-independent handshake to establish byte-0 alignment
+ *      at boot). This requires MMWDEMO_SPI1_CHUNK_LEN == 1 (CS toggling
+ *      every byte) so that each SPI_transfer() below corresponds to exactly
+ *      one byte.
  *
  *        1) receive phase  - slave shifts out a dummy/idle pattern on MISO
  *                             while it captures whatever the master sends,
- *                             1 byte per CS assertion, until MMWDEMO_SPI1_MSG_LEN
- *                             consecutive bytes match the expected command.
+ *                             1 byte per CS assertion, until the full
+ *                             command matched.
  *        2) response phase - once the full command matched, slave shifts
- *                             out the fixed response on MISO, again 1 byte
+ *                             out the response on MISO, again 1 byte
  *                             per CS assertion (via MmwDemo_spi1TransferChunks).
  *
  *      NOTE: The SPI protocol/driver has no built-in handshake. The slave is
@@ -478,14 +672,12 @@ void MmwDemo_spi1SlaveTask(UArg arg0, UArg arg1)
 {
     uint8_t          rxByte;
     uint8_t          respRxBuf[MMWDEMO_SPI1_RESP_LEN];
-    uint8_t          matchLen = 0U;     /* progress on gMmwDemoSpi1ExpectedCmd */
-    uint8_t          abMatchLen = 0U;   /* progress on gMmwDemoSpi1AbCmd ("abAB") */
-    uint8_t          bfMatchLen = 0U;   /* progress on gMmwDemoSpi1BfCmdPattern ("spiMca#b#.##") */
-    char             bfRxBuf[MMWDEMO_SPI1_BF_CMD_LEN];
+    MmwDemo_Spi1CmdMatcher matcher = { 0 };
+    int32_t          cmdIdx;
     /* Was 0xFFU. Diagnostic showed every corrupted MISO bit is a falling
      * (1->0) transition that occasionally samples as a stale 1 - idling low
      * instead of high removes the 1->0 step at the boundary into the
-     * response phase's first bit. See gMmwDemoSpi1FixedResponse. */
+     * response phase's first bit. See MMWDEMO_SPI1_RESP_LEN. */
     const uint8_t    txIdleByte = 0x00U;
     SPI_Transaction  spiTransaction = { 0 };
 
@@ -510,53 +702,32 @@ void MmwDemo_spi1SlaveTask(UArg arg0, UArg arg1)
         {
             CLI_write("Error: MmwDemo_spi1SlaveTask - SPI_transfer failed, status=%d\n",
                       (int32_t)spiTransaction.status);
-            matchLen   = 0U;
-            abMatchLen = 0U;
-            bfMatchLen = 0U;
+            matcher.matchLen = 0U;
             continue;
         }
 
         /**********************************************************************
-         * Phase 2: a full command matched - send its fixed response,
-         * 1 byte per CS. The binary matchers see every byte; the patterns
-         * share no first byte, so at most one can complete per byte.
+         * Phase 2: a full command matched - send its response, 1 byte per CS.
          **********************************************************************/
-        if (MmwDemo_spi1BfMatchStep(&bfMatchLen, rxByte, bfRxBuf))
+        cmdIdx = MmwDemo_spi1CmdMatchStep(&matcher, rxByte);
+        if (cmdIdx == MMWDEMO_SPI1_CMD_BF)
         {
-            matchLen   = 0U;
-            abMatchLen = 0U;
-            MmwDemo_spi1HandleBfCmd(bfRxBuf, respRxBuf);
+            MmwDemo_spi1HandleBfCmd(matcher.rxBuf, respRxBuf);
         }
-        else if (bfMatchLen > 0U)
+        else if ((cmdIdx == MMWDEMO_SPI1_CMD_FRAMECFG) || (cmdIdx == MMWDEMO_SPI1_CMD_LOWPOWER))
         {
-            /* Mid-way through "spiMc..": keep its bytes away from the other
-             * matchers. Its 'a' would otherwise start "abAB", and that
-             * matcher's resync CLI_write on the next byte would stall this
-             * task long enough to drop the rest of the string. */
-            matchLen   = 0U;
-            abMatchLen = 0U;
+            MmwDemo_spi1HandleBootCfgCmd(cmdIdx, matcher.rxBuf, respRxBuf);
         }
-        else if (MmwDemo_spi1MatchStep(gMmwDemoSpi1ExpectedCmd, &matchLen, rxByte))
+        else if (cmdIdx >= MMWDEMO_SPI1_CMD_CLUTTER)
         {
-            abMatchLen = 0U;
-            (void)MmwDemo_spi1TransferChunks(gMmwDemoSpi1Handle, gMmwDemoSpi1FixedResponse, respRxBuf, MMWDEMO_SPI1_RESP_LEN);
-        }
-        else if (MmwDemo_spi1MatchStep(gMmwDemoSpi1AbCmd, &abMatchLen, rxByte))
-        {
-            matchLen = 0U;
-            (void)MmwDemo_spi1TransferChunks(gMmwDemoSpi1Handle, gMmwDemoSpi1AbResponse, respRxBuf, MMWDEMO_SPI1_RESP_LEN);
+            MmwDemo_spi1HandleDynCmd(cmdIdx, matcher.rxBuf, respRxBuf);
         }
 
-        /* No per-byte CLI_write here anymore. It used to unconditionally
-         * echo every received MOSI byte, but CLI_write is a blocking/polled
-         * UART transmit - slow enough that with a multi-byte command sent
-         * back-to-back with no gap (MMWDEMO_SPI1_MSG_LEN=4), the slave was
-         * still stuck inside CLI_write when the master's next CS pulse
-         * arrived, missing that byte's clock edges entirely. Confirmed
-         * 2026-08-25: with the echo in place, bytes 1 and 3 of every 4-byte
-         * command (0xA5 0x5A 0x01 0x02) were silently dropped every single
-         * time - the slave only ever captured 0xA5 then 0x01 (byte 2) before
-         * resyncing. Removing it keeps Phase 1 fast enough to keep pace with
-         * back-to-back command bytes. */
+        /* No per-byte CLI_write here. CLI_write is a blocking/polled UART
+         * transmit - slow enough that with a multi-byte command sent
+         * back-to-back with no gap, the slave is still stuck inside
+         * CLI_write when the master's next CS pulse arrives, missing that
+         * byte's clock edges entirely (confirmed 2026-08-25: every other
+         * command byte was dropped with a per-byte echo in place). */
     }
 }

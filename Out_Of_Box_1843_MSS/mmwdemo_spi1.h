@@ -15,19 +15,14 @@
 
 #include <xdc/std.h>
 #include <stdint.h>
+#include <stdbool.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-/*! @brief Number of bytes in the fixed command (master -> slave). Command is
- *         0xA5 0x5A 0x01 0x02 (see gMmwDemoSpi1ExpectedCmd in mmwdemo_spi1.c).
- *         Must be a multiple of MMWDEMO_SPI1_CHUNK_LEN. */
-#define MMWDEMO_SPI1_MSG_LEN            4U
-
 /*! @brief Number of bytes in the response (slave -> master), and therefore
- *         the number of distinct response codes encodable: see
- *         @ref MmwDemo_spi1SetResponseCode. The diagnosed MISO fault
+ *         the number of distinct response codes encodable. The diagnosed MISO fault
  *         (2026-08-25) only ever flips a bit that should be 0, right after a
  *         driven 1, into a spurious 1 - a bit that should be 1 has never
  *         once been misread as 0, and attempts to correct it in-band (extra
@@ -54,8 +49,7 @@ extern "C" {
  *         still satisfies that. Set to 1 because the non-DMA/interrupt-driven
  *         MIBSPI_ISR path could not keep up with the 2nd byte of a 16-bit
  *         continuous-CS transfer in testing (only the 1st byte of each
- *         2-byte chunk was ever captured correctly). MMWDEMO_SPI1_MSG_LEN
- *         must be a multiple of this. */
+ *         2-byte chunk was ever captured correctly). */
 #define MMWDEMO_SPI1_CHUNK_LEN           1U
 
 /*! @brief SYSBIOS task priority used for @ref MmwDemo_spi1SlaveTask.
@@ -67,6 +61,11 @@ extern "C" {
  *         preemption was not the actual cause and this is reverted back to
  *         its original low priority. */
 #define MMWDEMO_SPI1_TASK_PRIORITY      2
+
+/*! @brief How long @ref MmwDemo_spi1WaitBootCfg waits at power-up for the nRF
+ *         to send frameCfg/lowPower (BIOS Clock tick = 1ms, so 5 s). The nRF
+ *         side retries for slightly longer (TI_BOOT_CFG_TIMEOUT_MS). */
+#define MMWDEMO_SPI1_BOOT_CFG_TIMEOUT_TICKS     5000U
 
 /**
  *  @b Description
@@ -88,30 +87,27 @@ extern int32_t MmwDemo_spi1Init(void);
 /**
  *  @b Description
  *  @n
- *      Sets which response code is sent the next time the command is
- *      matched: thermometer/unary-encodes `code` into the response buffer
- *      as `code` leading 0xFF bytes followed by 0x00 bytes (see
- *      MMWDEMO_SPI1_RESP_LEN for why). `code` is clamped to
- *      [0, MMWDEMO_SPI1_RESP_LEN] if out of range.
+ *      Blocks until both power-up settings, "spiMaa####" (frameCfg
+ *      periodicity) and "spiMba#" (lowPower adcMode), have been received
+ *      by @ref MmwDemo_spi1SlaveTask, or until the timeout expires.
  *
- *      Not synchronized against @ref MmwDemo_spi1SlaveTask - call this from
- *      application code well before the next expected command match (e.g.
- *      right after handling the previous one), not concurrently with a
- *      transfer in progress.
- *
- *  @param[in] code     Response code to send next, in [0, MMWDEMO_SPI1_RESP_LEN]
+ *  @param[in] timeoutTicks     Maximum wait, in BIOS Clock ticks
  *
  *  @retval
- *      Not Applicable.
+ *      true    - both settings received
+ *  @retval
+ *      false   - timeout (or SPI1 not initialized)
  */
-extern void MmwDemo_spi1SetResponseCode(uint8_t code);
+extern bool MmwDemo_spi1WaitBootCfg(uint32_t timeoutTicks);
 
 /**
  *  @b Description
  *  @n
- *      Example SYSBIOS task body for SPI1. Waits (blocking) for a fixed
- *      command pattern from the SPI master and replies with a fixed
- *      response. Intended to be passed directly to Task_create().
+ *      Example SYSBIOS task body for SPI1. Waits (blocking) for the
+ *      "spiMca<E>b<T.TT>" / "spiMaa####" / "spiMba#" / "spiMda#" ~
+ *      "spiMia#.#b#.#" commands from the SPI master and replies with their
+ *      response (see gMmwDemoSpi1CmdPatterns in mmwdemo_spi1.c). Intended to be passed
+ *      directly to Task_create().
  *
  *  @param[in] arg0     Unused (Task_create signature)
  *  @param[in] arg1     Unused (Task_create signature)

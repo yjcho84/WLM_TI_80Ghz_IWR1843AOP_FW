@@ -174,6 +174,34 @@ static char* gMmwDemoAutoCfgCommands[] =
 #define MMWDEMO_MULTIOBJBF_CMD_MAX_LEN          48
 static char gMmwDemoMultiObjBeamFormingCmd[MMWDEMO_MULTIOBJBF_CMD_MAX_LEN] = "multiObjBeamForming -1 0 0.5";
 
+/* Writable backing store for the frameCfg / lowPower entries. Unlike
+ * multiObjBeamForming these cannot change while the sensor runs, so they are
+ * only rewritten (SPI1 "spiMaa####" / "spiMba#" sent by the nRF at power-up)
+ * before MmwDemo_CLIRunAutoConfig() executes the table. */
+#define MMWDEMO_FRAMECFG_CMD_MAX_LEN            48
+static char gMmwDemoFrameCfgCmd[MMWDEMO_FRAMECFG_CMD_MAX_LEN] = "frameCfg 0 2 16 0 1000 1 0";
+#define MMWDEMO_LOWPOWER_CMD_MAX_LEN            16
+static char gMmwDemoLowPowerCmd[MMWDEMO_LOWPOWER_CMD_MAX_LEN] = "lowPower 0 0";
+
+/* Writable backing store for the other run-time updatable entries (SPI1
+ * "spiMda#" ~ "spiMia#.#b#.#"). Like multiObjBeamForming they are applied at
+ * the next frame boundary and the table entry is rewritten to match. */
+#define MMWDEMO_DYNCFG_CMD_MAX_LEN              48
+static char gMmwDemoClutterRemovalCmd[MMWDEMO_DYNCFG_CMD_MAX_LEN]  = "clutterRemoval -1 0";
+static char gMmwDemoCalibDcRangeSigCmd[MMWDEMO_DYNCFG_CMD_MAX_LEN] = "calibDcRangeSig -1 1 -5 8 256";
+static char gMmwDemoExtMaxVelocityCmd[MMWDEMO_DYNCFG_CMD_MAX_LEN]  = "extendedMaxVelocity -1 0";
+static char gMmwDemoAoaFovCfgCmd[MMWDEMO_DYNCFG_CMD_MAX_LEN]       = "aoaFovCfg -1 -90 90 -90 90";
+static char gMmwDemoCfarFovRangeCmd[MMWDEMO_DYNCFG_CMD_MAX_LEN]    = "cfarFovCfg -1 0 0 16.18";
+static char gMmwDemoCfarFovDopplerCmd[MMWDEMO_DYNCFG_CMD_MAX_LEN]  = "cfarFovCfg -1 1 -1 1.00";
+
+/* Set once MmwDemo_CLIRunAutoConfig() starts; frameCfg/lowPower updates
+ * received after that are ignored. */
+static volatile bool gMmwDemoAutoCfgStarted = false;
+
+/* CLI configuration saved by MmwDemo_CLIInit() for MmwDemo_CLIRunAutoConfig(). */
+static CLI_Cfg*     gMmwDemoAutoCfgCliCfg = NULL;
+static uint32_t     gMmwDemoAutoCfgNumCmds = 0U;
+
 static char* gMmwDemoAutoCfgCommands[] =
 {
     "sensorStop",
@@ -186,28 +214,36 @@ static char* gMmwDemoAutoCfgCommands[] =
     "chirpCfg 0 0 0 0 0 0 0 1",
     "chirpCfg 1 1 0 0 0 0 0 2",
     "chirpCfg 2 2 0 0 0 0 0 4",
-    "frameCfg 0 2 16 0 1000 1 0",
-    //"frameCfg 0 2 32 0 100 1 0", //->26.09.02 
-    "lowPower 0 0",
+    //"frameCfg 0 2 16 0 1000 1 0",
+    //"frameCfg 0 2 32 0 100 1 0", //->26.09.02
+    gMmwDemoFrameCfgCmd, //->26.10.21 "frameCfg 0 2 16 0 1000 1 0", periodicity set over SPI1 at power-up
+    //"lowPower 0 0",
+    gMmwDemoLowPowerCmd, //->26.10.21 "lowPower 0 0", adcMode set over SPI1 at power-up
     //"guiMonitor -1 1 1 0 0 0 1",
     "guiMonitor -1 1 0 0 0 0 0",
     "cfarCfg -1 0 2 8 4 3 0 15 1",
     "cfarCfg -1 1 0 4 2 3 1 15 1",
     //"multiObjBeamForming -1 1 0.5",
     gMmwDemoMultiObjBeamFormingCmd, //->26.09.02 "multiObjBeamForming -1 0 0.5", updatable over SPI1
-    "clutterRemoval -1 0",
+    //"clutterRemoval -1 0",
+    gMmwDemoClutterRemovalCmd, //->26.10.23 "clutterRemoval -1 0", updatable over SPI1
     //"calibDcRangeSig -1 0 -5 8 256",
-    "calibDcRangeSig -1 1 -5 8 256", //->26.09.02
-    "extendedMaxVelocity -1 0",
+    //"calibDcRangeSig -1 1 -5 8 256", //->26.09.02
+    gMmwDemoCalibDcRangeSigCmd, //->26.10.23 "calibDcRangeSig -1 1 -5 8 256", updatable over SPI1
+    //"extendedMaxVelocity -1 0",
+    gMmwDemoExtMaxVelocityCmd, //->26.10.23 "extendedMaxVelocity -1 0", updatable over SPI1
     "lvdsStreamCfg -1 0 0 0",
     "compRangeBiasAndRxChanPhase 0.0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0",
     "measureRangeBiasAndRxChanPhase 0 1.5 0.2",
     "CQRxSatMonitor 0 3 5 121 0",
     "CQSigImgMonitor 0 115 8",
     "analogMonitor 0 0",
-    "aoaFovCfg -1 -90 90 -90 90",
-    "cfarFovCfg -1 0 0 16.18",
-    "cfarFovCfg -1 1 -1 1.00",
+    //"aoaFovCfg -1 -90 90 -90 90",
+    gMmwDemoAoaFovCfgCmd, //->26.10.23 "aoaFovCfg -1 -90 90 -90 90", updatable over SPI1
+    //"cfarFovCfg -1 0 0 16.18",
+    gMmwDemoCfarFovRangeCmd, //->26.10.23 "cfarFovCfg -1 0 0 16.18", updatable over SPI1
+    //"cfarFovCfg -1 1 -1 1.00",
+    gMmwDemoCfarFovDopplerCmd, //->26.10.23 "cfarFovCfg -1 1 -1 1.00", updatable over SPI1
     "calibData 0 0 0",
     "sensorStart"
 };
@@ -923,6 +959,342 @@ int32_t MmwDemo_CLIUpdateMultiObjBeamForming (char* enabledStr, char* thrScaleSt
 /**
  *  @b Description
  *  @n
+ *      Sets the framePeriodicity of the frameCfg entry of
+ *      gMmwDemoAutoCfgCommands[], i.e. "frameCfg 0 2 16 0 <periodMs> 1 0".
+ *      Takes effect only if called before @ref MmwDemo_CLIRunAutoConfig.
+ *
+ *  @param[in] periodMs     Frame periodicity in ms, 100 ~ 1000
+ *
+ *  @retval
+ *      0   - stored, used by this power-up's auto configuration
+ *  @retval
+ *      1   - ignored, auto configuration has already run
+ *  @retval
+ *      <0  - invalid value
+ */
+int32_t MmwDemo_CLIUpdateFramePeriodicity (uint32_t periodMs)
+{
+    if ((periodMs < 100U) || (periodMs > 1000U))
+    {
+        return -1;
+    }
+
+    if (gMmwDemoAutoCfgStarted)
+    {
+        return 1;
+    }
+
+    snprintf (gMmwDemoFrameCfgCmd, sizeof(gMmwDemoFrameCfgCmd), "frameCfg 0 2 16 0 %u 1 0",
+              (unsigned int)periodMs);
+    return 0;
+}
+
+/**
+ *  @b Description
+ *  @n
+ *      Sets the adcMode of the lowPower entry of gMmwDemoAutoCfgCommands[],
+ *      i.e. "lowPower 0 <adcMode>". Takes effect only if called before
+ *      @ref MmwDemo_CLIRunAutoConfig.
+ *
+ *  @param[in] adcMode      0 (regular ADC) or 1 (low power ADC)
+ *
+ *  @retval
+ *      0   - stored, used by this power-up's auto configuration
+ *  @retval
+ *      1   - ignored, auto configuration has already run
+ *  @retval
+ *      <0  - invalid value
+ */
+int32_t MmwDemo_CLIUpdateLowPower (uint32_t adcMode)
+{
+    if (adcMode > 1U)
+    {
+        return -1;
+    }
+
+    if (gMmwDemoAutoCfgStarted)
+    {
+        return 1;
+    }
+
+    snprintf (gMmwDemoLowPowerCmd, sizeof(gMmwDemoLowPowerCmd), "lowPower 0 %u",
+              (unsigned int)adcMode);
+    return 0;
+}
+
+/**
+ *  @b Description
+ *  @n
+ *      Common part of the run-time updates below: runs the CLI handler with
+ *      argv (the new values are marked pending and pushed to the DPC by
+ *      MmwDemo_processPendingDynamicCfgCommands() at the next frame boundary,
+ *      no sensorStop/sensorStart needed) and, on success, rewrites the matching
+ *      gMmwDemoAutoCfgCommands[] entry with the space-joined argv.
+ *
+ *      argv is built by the caller, not tokenized with strtok, because strtok
+ *      is not reentrant and MmwDemo_CLIAutoConfig() (initTask) uses it.
+ *
+ *  @param[in]  handlerFxn  CLI handler of the command
+ *  @param[in]  argc        Number of arguments
+ *  @param[in]  argv        Arguments, argv[0] = command name
+ *  @param[out] cmdBuf      Table entry backing store to rewrite
+ *  @param[in]  cmdBufSize  Size of cmdBuf
+ *
+ *  @retval
+ *      Success -   0
+ *  @retval
+ *      Error   -   <0
+ */
+static int32_t MmwDemo_CLIApplyDynCfg (CLI_CmdHandler handlerFxn, int32_t argc, char* argv[],
+                                       char* cmdBuf, uint32_t cmdBufSize)
+{
+    char        cmdString[MMWDEMO_DYNCFG_CMD_MAX_LEN];
+    uint32_t    len = 0U;
+    int32_t     n;
+    int32_t     i;
+
+    for (i = 0; i < argc; i++)
+    {
+        n = snprintf (&cmdString[len], sizeof(cmdString) - len, (i == 0) ? "%s" : " %s", argv[i]);
+        if ((n < 0) || ((uint32_t)n >= (sizeof(cmdString) - len)))
+        {
+            return -1;
+        }
+        len += (uint32_t)n;
+    }
+    if (len >= cmdBufSize)
+    {
+        return -1;
+    }
+
+    if (handlerFxn (argc, argv) != 0)
+    {
+        return -1;
+    }
+
+    strcpy (cmdBuf, cmdString);
+    return 0;
+}
+
+/**
+ *  @b Description
+ *  @n
+ *      Run-time update of "clutterRemoval -1 <enabled>".
+ *
+ *  @param[in] enabled      0 or 1
+ *
+ *  @retval
+ *      Success -   0
+ *  @retval
+ *      Error   -   <0
+ */
+int32_t MmwDemo_CLIUpdateClutterRemoval (uint32_t enabled)
+{
+    char*   argv[3];
+
+    if (enabled > 1U)
+    {
+        return -1;
+    }
+
+    argv[0] = "clutterRemoval";
+    argv[1] = "-1";
+    argv[2] = (enabled != 0U) ? "1" : "0";
+
+    return MmwDemo_CLIApplyDynCfg (MmwDemo_CLIClutterRemoval, 3, argv,
+                                   gMmwDemoClutterRemovalCmd, sizeof(gMmwDemoClutterRemovalCmd));
+}
+
+/**
+ *  @b Description
+ *  @n
+ *      Run-time update of "calibDcRangeSig -1 <enabled> -5 8 256". A changed
+ *      configuration restarts the DC range signature calibration (the next
+ *      256 chirps, i.e. a few frames, are averaged again).
+ *
+ *  @param[in] enabled      0 or 1
+ *
+ *  @retval
+ *      Success -   0
+ *  @retval
+ *      Error   -   <0
+ */
+int32_t MmwDemo_CLIUpdateCalibDcRangeSig (uint32_t enabled)
+{
+    char*   argv[6];
+
+    if (enabled > 1U)
+    {
+        return -1;
+    }
+
+    argv[0] = "calibDcRangeSig";
+    argv[1] = "-1";
+    argv[2] = (enabled != 0U) ? "1" : "0";
+    argv[3] = "-5";
+    argv[4] = "8";
+    argv[5] = "256";
+
+    return MmwDemo_CLIApplyDynCfg (MmwDemo_CLICalibDcRangeSig, 6, argv,
+                                   gMmwDemoCalibDcRangeSigCmd, sizeof(gMmwDemoCalibDcRangeSigCmd));
+}
+
+/**
+ *  @b Description
+ *  @n
+ *      Run-time update of "extendedMaxVelocity -1 <enabled>".
+ *
+ *  @param[in] enabled      0 or 1
+ *
+ *  @retval
+ *      Success -   0
+ *  @retval
+ *      Error   -   <0
+ */
+int32_t MmwDemo_CLIUpdateExtMaxVelocity (uint32_t enabled)
+{
+    char*   argv[3];
+
+    if (enabled > 1U)
+    {
+        return -1;
+    }
+
+    argv[0] = "extendedMaxVelocity";
+    argv[1] = "-1";
+    argv[2] = (enabled != 0U) ? "1" : "0";
+
+    return MmwDemo_CLIApplyDynCfg (MmwDemo_CLIExtendedMaxVelocity, 3, argv,
+                                   gMmwDemoExtMaxVelocityCmd, sizeof(gMmwDemoExtMaxVelocityCmd));
+}
+
+/**
+ *  @b Description
+ *  @n
+ *      Run-time update of
+ *      "aoaFovCfg -1 -<minAzimMag> <maxAzim> -<minElevMag> <maxElev>".
+ *      The minimums are passed as magnitudes (the SPI command carries no
+ *      '-' sign).
+ *
+ *  @param[in] minAzimMag   |minimum azimuth|, degrees, 0 ~ 90
+ *  @param[in] maxAzim      maximum azimuth, degrees, 0 ~ 90
+ *  @param[in] minElevMag   |minimum elevation|, degrees, 0 ~ 90
+ *  @param[in] maxElev      maximum elevation, degrees, 0 ~ 90
+ *
+ *  @retval
+ *      Success -   0
+ *  @retval
+ *      Error   -   <0
+ */
+int32_t MmwDemo_CLIUpdateAoaFov (uint32_t minAzimMag, uint32_t maxAzim,
+                                 uint32_t minElevMag, uint32_t maxElev)
+{
+    char*   argv[6];
+    char    minAzimStr[4];
+    char    maxAzimStr[4];
+    char    minElevStr[4];
+    char    maxElevStr[4];
+
+    if ((minAzimMag > 90U) || (maxAzim > 90U) || (minElevMag > 90U) || (maxElev > 90U))
+    {
+        return -1;
+    }
+
+    snprintf (minAzimStr, sizeof(minAzimStr), "%d", -(int32_t)minAzimMag);
+    snprintf (maxAzimStr, sizeof(maxAzimStr), "%u", (unsigned int)maxAzim);
+    snprintf (minElevStr, sizeof(minElevStr), "%d", -(int32_t)minElevMag);
+    snprintf (maxElevStr, sizeof(maxElevStr), "%u", (unsigned int)maxElev);
+
+    argv[0] = "aoaFovCfg";
+    argv[1] = "-1";
+    argv[2] = minAzimStr;
+    argv[3] = maxAzimStr;
+    argv[4] = minElevStr;
+    argv[5] = maxElevStr;
+
+    return MmwDemo_CLIApplyDynCfg (MmwDemo_CLIAoAFovCfg, 6, argv,
+                                   gMmwDemoAoaFovCfgCmd, sizeof(gMmwDemoAoaFovCfgCmd));
+}
+
+/**
+ *  @b Description
+ *  @n
+ *      Run-time update of the range FOV, "cfarFovCfg -1 0 0 <max>".
+ *
+ *  @param[in] maxX100      maximum range in meters * 100, 100 ~ 2000 (1.00 ~ 20.00)
+ *
+ *  @retval
+ *      Success -   0
+ *  @retval
+ *      Error   -   <0
+ */
+int32_t MmwDemo_CLIUpdateCfarFovRange (uint32_t maxX100)
+{
+    char*   argv[5];
+    char    maxStr[8];
+
+    if ((maxX100 < 100U) || (maxX100 > 2000U))
+    {
+        return -1;
+    }
+
+    snprintf (maxStr, sizeof(maxStr), "%u.%02u",
+              (unsigned int)(maxX100 / 100U), (unsigned int)(maxX100 % 100U));
+
+    argv[0] = "cfarFovCfg";
+    argv[1] = "-1";
+    argv[2] = "0";
+    argv[3] = "0";
+    argv[4] = maxStr;
+
+    return MmwDemo_CLIApplyDynCfg (MmwDemo_CLICfarFovCfg, 5, argv,
+                                   gMmwDemoCfarFovRangeCmd, sizeof(gMmwDemoCfarFovRangeCmd));
+}
+
+/**
+ *  @b Description
+ *  @n
+ *      Run-time update of the Doppler (velocity) FOV,
+ *      "cfarFovCfg -1 1 -<minMag> <max>". The minimum is passed as a
+ *      magnitude (the SPI command carries no '-' sign).
+ *
+ *  @param[in] minMagX10    |minimum velocity| in m/s * 10, 10 ~ 25 (1.0 ~ 2.5)
+ *  @param[in] maxX10       maximum velocity in m/s * 10, 10 ~ 25 (1.0 ~ 2.5)
+ *
+ *  @retval
+ *      Success -   0
+ *  @retval
+ *      Error   -   <0
+ */
+int32_t MmwDemo_CLIUpdateCfarFovDoppler (uint32_t minMagX10, uint32_t maxX10)
+{
+    char*   argv[5];
+    char    minStr[8];
+    char    maxStr[8];
+
+    if ((minMagX10 < 10U) || (minMagX10 > 25U) || (maxX10 < 10U) || (maxX10 > 25U))
+    {
+        return -1;
+    }
+
+    snprintf (minStr, sizeof(minStr), "-%u.%u",
+              (unsigned int)(minMagX10 / 10U), (unsigned int)(minMagX10 % 10U));
+    snprintf (maxStr, sizeof(maxStr), "%u.%u",
+              (unsigned int)(maxX10 / 10U), (unsigned int)(maxX10 % 10U));
+
+    argv[0] = "cfarFovCfg";
+    argv[1] = "-1";
+    argv[2] = "1";
+    argv[3] = minStr;
+    argv[4] = maxStr;
+
+    return MmwDemo_CLIApplyDynCfg (MmwDemo_CLICfarFovCfg, 5, argv,
+                                   gMmwDemoCfarFovDopplerCmd, sizeof(gMmwDemoCfarFovDopplerCmd));
+}
+
+/**
+ *  @b Description
+ *  @n
  *      This is the CLI Handler for DC range calibration
  *
  *  @param[in] argc
@@ -1551,7 +1923,8 @@ static int32_t MmwDemo_CLICalibDataSaveRestore(int32_t argc, char* argv[])
  */
 void MmwDemo_CLIInit (uint8_t taskPriority)
 {
-    CLI_Cfg     cliCfg;
+    /* static: MmwDemo_CLIRunAutoConfig() uses its tableEntry[] after this returns */
+    static CLI_Cfg  cliCfg;
     char        demoBanner[256];
     uint32_t    cnt;
 
@@ -1695,10 +2068,33 @@ void MmwDemo_CLIInit (uint8_t taskPriority)
     }
     System_printf ("Debug: CLI is operational\n");
 
-    /* Automatically run the sensor configuration sequence at power-up
-     * (through sensorStart) instead of waiting for a host to send it
-     * over UART. */
-    MmwDemo_CLIAutoConfig (&cliCfg, cnt);
+    /* The power-up auto configuration is no longer run from here: the
+     * caller first lets the nRF set frameCfg/lowPower over SPI1, then calls
+     * MmwDemo_CLIRunAutoConfig(). */
+    gMmwDemoAutoCfgCliCfg  = &cliCfg;
+    gMmwDemoAutoCfgNumCmds = cnt;
 
     return;
+}
+
+/**
+ *  @b Description
+ *  @n
+ *      Automatically runs the sensor configuration sequence at power-up
+ *      (through sensorStart) instead of waiting for a host to send it over
+ *      UART. Must be called once, after @ref MmwDemo_CLIInit.
+ *
+ *  @retval
+ *      Not Applicable.
+ */
+void MmwDemo_CLIRunAutoConfig (void)
+{
+    if (gMmwDemoAutoCfgCliCfg == NULL)
+    {
+        System_printf ("Error: MmwDemo_CLIRunAutoConfig - CLI not initialized\n");
+        return;
+    }
+
+    gMmwDemoAutoCfgStarted = true;
+    MmwDemo_CLIAutoConfig (gMmwDemoAutoCfgCliCfg, gMmwDemoAutoCfgNumCmds);
 }
