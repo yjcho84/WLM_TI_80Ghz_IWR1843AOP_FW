@@ -210,7 +210,8 @@ static char* gMmwDemoAutoCfgCommands[] =
     "channelCfg 15 7 0",
     "adcCfg 2 1",
     "adcbufCfg -1 0 1 1 1",
-    "profileCfg 0 77 267 7 57.14 0 0 70 1 464 9442 0 0 30",
+    //"profileCfg 0 77 267 7 57.14 0 0 70 1 464 9442 0 0 30",
+    "profileCfg 0 77 267 7 57.14 0 0 70 1 464 9442 0 0 24", //->26.11.05 rxGain 30->24 (near-range saturation test)
     "chirpCfg 0 0 0 0 0 0 0 1",
     "chirpCfg 1 1 0 0 0 0 0 2",
     "chirpCfg 2 2 0 0 0 0 0 4",

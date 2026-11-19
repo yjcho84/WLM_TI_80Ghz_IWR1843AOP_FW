@@ -154,6 +154,8 @@ mmwdemo_spi1.oer4f: C:/ti/bios_6_73_01_01/packages/ti/sysbios/knl/Task.h
 mmwdemo_spi1.oer4f: C:/ti/xdctools_3_50_08_24_core/packages/xdc/runtime/IModule.h
 mmwdemo_spi1.oer4f: C:/ti/bios_6_73_01_01/packages/ti/sysbios/knl/Event__epilogue.h
 mmwdemo_spi1.oer4f: C:/ti/bios_6_73_01_01/packages/ti/sysbios/knl/Semaphore__epilogue.h
+mmwdemo_spi1.oer4f: C:/ti/bios_6_73_01_01/packages/ti/sysbios/knl/Clock.h
+mmwdemo_spi1.oer4f: C:/ti/bios_6_73_01_01/packages/ti/sysbios/knl/package/Clock_TimerProxy.h
 mmwdemo_spi1.oer4f: C:/ti/mmwave_sdk_03_05_00_04/packages/ti/drivers/pinmux/pinmux.h
 mmwdemo_spi1.oer4f: C:/ti/ti-cgt-arm_16.9.6.LTS/include/stddef.h
 mmwdemo_spi1.oer4f: C:/ti/mmwave_sdk_03_05_00_04/packages/ti/common/mmwave_error.h
@@ -494,6 +496,10 @@ C:/ti/xdctools_3_50_08_24_core/packages/xdc/runtime/IModule.h:
 C:/ti/bios_6_73_01_01/packages/ti/sysbios/knl/Event__epilogue.h:
 
 C:/ti/bios_6_73_01_01/packages/ti/sysbios/knl/Semaphore__epilogue.h:
+
+C:/ti/bios_6_73_01_01/packages/ti/sysbios/knl/Clock.h:
+
+C:/ti/bios_6_73_01_01/packages/ti/sysbios/knl/package/Clock_TimerProxy.h:
 
 C:/ti/mmwave_sdk_03_05_00_04/packages/ti/drivers/pinmux/pinmux.h:
 

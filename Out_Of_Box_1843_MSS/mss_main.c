@@ -650,6 +650,36 @@
 #define MMWDEMO_MMWAVE_CTRL_TASK_PRIORITY         5
 /* MMWDEMO_SPI1_TASK_PRIORITY (2) is defined in mmwdemo_spi1.h */
 
+//->26.11.06 1: the application never opens the command UART (SCI-A). The CLI gets a
+//   dummy handle: no CLI input, no TI UART logs. The logging UART (radar TLV to nRF)
+//   and the ROM bootloader (flashing) are not affected.
+//   0: normal CLI input and output for development.
+#define MMWDEMO_CMD_UART_NOT_OPENED               0 //->26.11.06 0 for the SPI1 diag log (was 1)
+
+#if MMWDEMO_CMD_UART_NOT_OPENED
+/* CLI_open always starts CLI_task, which calls UART_read on its handle, so the handle
+ * cannot be NULL. This read blocks forever: CLI_task uses no CPU. */
+static int32_t MmwDemo_cmdUartReadNull(UART_Handle handle, uint8_t *buffer, uint32_t size)
+{
+    (void)handle;
+    (void)buffer;
+    (void)size;
+    while (1)
+    {
+        /* Not BIOS_WAIT_FOREVER: Task_sleep asserts on it (Task_A_badTimeout) */
+        Task_sleep(3600000U);
+    }
+}
+
+/* CLI_write output is dropped (the CLI uses polled mode) */
+static int32_t MmwDemo_cmdUartWritePollingNull(UART_Handle handle, uint8_t *buffer, uint32_t size)
+{
+    (void)handle;
+    (void)buffer;
+    return (int32_t)size;
+}
+#endif
+
 #if (MMWDEMO_CLI_TASK_PRIORITY >= MMWDEMO_DPC_OBJDET_DPM_TASK_PRIORITY)
 #error CLI task priority must be < Object Detection DPM task priority
 #endif
@@ -3755,6 +3785,18 @@ static void MmwDemo_initTask(UArg arg0, UArg arg1)
     /*****************************************************************************
      * Open the mmWave SDK components:
      *****************************************************************************/
+#if MMWDEMO_CMD_UART_NOT_OPENED //->26.11.06
+    {
+        static UART_FxnTable gCmdUartFxnTable;
+        static UART_Config   gCmdUartConfig;
+
+        gCmdUartFxnTable.readFxn         = MmwDemo_cmdUartReadNull;
+        gCmdUartFxnTable.writePollingFxn = MmwDemo_cmdUartWritePollingNull;
+        gCmdUartConfig.fxnTablePtr       = &gCmdUartFxnTable;
+
+        gMmwMssMCB.commandUartHandle = &gCmdUartConfig;
+    }
+#else
     /* Setup the default UART Parameters */
     UART_Params_init(&uartParams);
     uartParams.clockFrequency = gMmwMssMCB.cfg.platformCfg.sysClockFrequency;
@@ -3770,6 +3812,7 @@ static void MmwDemo_initTask(UArg arg0, UArg arg1)
         return;
     }
     //System_printf("Debug: UART Instance %p has been opened successfully\n", gMmwMssMCB.commandUartHandle);
+#endif
 
     /* Setup the default UART Parameters */
     UART_Params_init(&uartParams);

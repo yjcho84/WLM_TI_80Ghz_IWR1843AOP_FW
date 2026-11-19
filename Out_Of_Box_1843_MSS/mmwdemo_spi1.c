@@ -34,6 +34,7 @@
 #include <xdc/std.h>
 #include <ti/sysbios/knl/Task.h>
 #include <ti/sysbios/knl/Semaphore.h>
+#include <ti/sysbios/knl/Clock.h>
 
 /* mmWave SDK Include Files. */
 #include <ti/drivers/pinmux/pinmux.h>
@@ -138,6 +139,19 @@ static const uint8_t gMmwDemoSpi1ErrResponse[MMWDEMO_SPI1_RESP_LEN] =
     0x00U,
     0x00U
 };
+
+//->26.11.06 Diagnostic for "nRF reads 00 00 00 00 without the adapter TX wire on N4".
+//   1: idle byte 0x55 and one "SPI1 diag" UART line after each handled command.
+//      Needs MMWDEMO_CMD_UART_NOT_OPENED 0 in mss_main.c to see the line.
+//   0: normal operation (idle byte 0x00, no line).
+#define MMWDEMO_SPI1_DIAG_RESP          1
+
+#if MMWDEMO_SPI1_DIAG_RESP
+/* Clock ticks (1 tick = 1 ms, default Clock.tickPeriod) around the response phase */
+static volatile uint32_t gMmwDemoSpi1DiagStartTick;
+static volatile uint32_t gMmwDemoSpi1DiagFirstTick;
+static volatile uint32_t gMmwDemoSpi1DiagEndTick;
+#endif
 
 /* Defined in mmw_cli.c */
 extern int32_t MmwDemo_CLIUpdateMultiObjBeamForming (char* enabledStr, char* thrScaleStr);
@@ -300,6 +314,11 @@ static bool MmwDemo_spi1TransferChunks(SPI_Handle handle, const uint8_t *txBuf, 
     SPI_Transaction  spiTransaction = { 0 };
     uint32_t         offset;
 
+#if MMWDEMO_SPI1_DIAG_RESP
+    gMmwDemoSpi1DiagStartTick = Clock_getTicks();
+    gMmwDemoSpi1DiagFirstTick = gMmwDemoSpi1DiagStartTick;
+#endif
+
     for (offset = 0U; offset < totalLen; offset += MMWDEMO_SPI1_CHUNK_LEN)
     {
         spiTransaction.count = MMWDEMO_SPI1_CHUNK_LEN;
@@ -312,7 +331,18 @@ static bool MmwDemo_spi1TransferChunks(SPI_Handle handle, const uint8_t *txBuf, 
                       (int32_t)offset, (int32_t)spiTransaction.status);
             return false;
         }
+
+#if MMWDEMO_SPI1_DIAG_RESP
+        if (offset == 0U)
+        {
+            gMmwDemoSpi1DiagFirstTick = Clock_getTicks();
+        }
+#endif
     }
+
+#if MMWDEMO_SPI1_DIAG_RESP
+    gMmwDemoSpi1DiagEndTick = Clock_getTicks();
+#endif
 
     return true;
 }
@@ -678,7 +708,12 @@ void MmwDemo_spi1SlaveTask(UArg arg0, UArg arg1)
      * (1->0) transition that occasionally samples as a stale 1 - idling low
      * instead of high removes the 1->0 step at the boundary into the
      * response phase's first bit. See MMWDEMO_SPI1_RESP_LEN. */
+#if MMWDEMO_SPI1_DIAG_RESP
+    const uint8_t    txIdleByte = 0x55U; //->26.11.06 tells idle from a real response at the nRF
+    uint32_t         diagMatchTick = 0U;
+#else
     const uint8_t    txIdleByte = 0x00U;
+#endif
     SPI_Transaction  spiTransaction = { 0 };
 
     if (gMmwDemoSpi1Handle == NULL)
@@ -710,6 +745,13 @@ void MmwDemo_spi1SlaveTask(UArg arg0, UArg arg1)
          * Phase 2: a full command matched - send its response, 1 byte per CS.
          **********************************************************************/
         cmdIdx = MmwDemo_spi1CmdMatchStep(&matcher, rxByte);
+#if MMWDEMO_SPI1_DIAG_RESP
+        if (cmdIdx >= 0)
+        {
+            diagMatchTick = Clock_getTicks();
+            memset(respRxBuf, 0xEE, sizeof(respRxBuf));
+        }
+#endif
         if (cmdIdx == MMWDEMO_SPI1_CMD_BF)
         {
             MmwDemo_spi1HandleBfCmd(matcher.rxBuf, respRxBuf);
@@ -722,6 +764,22 @@ void MmwDemo_spi1SlaveTask(UArg arg0, UArg arg1)
         {
             MmwDemo_spi1HandleDynCmd(cmdIdx, matcher.rxBuf, respRxBuf);
         }
+
+#if MMWDEMO_SPI1_DIAG_RESP
+        /* After the response, like every other log here.
+         * start: match -> response phase entered. first: until byte 0 was clocked
+         * (about 50 ms = nRF gap when it waits for the nRF). total: whole response.
+         * rx: bytes received in the response phase (nRF sends FF, EE = not received). */
+        if (cmdIdx >= 0)
+        {
+            CLI_write("SPI1 diag: cmd=%d start=%d first=%d total=%d ms rx=%02x %02x %02x %02x\n",
+                      cmdIdx,
+                      (int32_t)(gMmwDemoSpi1DiagStartTick - diagMatchTick),
+                      (int32_t)(gMmwDemoSpi1DiagFirstTick - gMmwDemoSpi1DiagStartTick),
+                      (int32_t)(gMmwDemoSpi1DiagEndTick - gMmwDemoSpi1DiagStartTick),
+                      respRxBuf[0], respRxBuf[1], respRxBuf[2], respRxBuf[3]);
+        }
+#endif
 
         /* No per-byte CLI_write here. CLI_write is a blocking/polled UART
          * transmit - slow enough that with a multi-byte command sent
