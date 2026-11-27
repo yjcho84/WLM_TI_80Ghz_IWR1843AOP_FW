@@ -221,9 +221,10 @@ static char* gMmwDemoAutoCfgCommands[] =
     gMmwDemoFrameCfgCmd, //->26.10.21 "frameCfg 0 2 16 0 1000 1 0", periodicity set over SPI1 at power-up
     //"lowPower 0 0",
     gMmwDemoLowPowerCmd, //->26.10.21 "lowPower 0 0", adcMode set over SPI1 at power-up
-    //"guiMonitor -1 1 0 0 0 0 0", //-> 26.11.27 Original
-    "guiMonitor -1 1 1 0 0 0 0", //-> 26.11.27 To check for the presence of a bin-peak at 0.2,0.3,0.4m
-    "cfarCfg -1 0 2 8 4 3 0 15 1",
+    "guiMonitor -1 1 0 0 0 0 0", //-> 26.11.27 Original
+    //"guiMonitor -1 1 1 0 0 0 0", //-> 26.11.27 To check for the presence of a bin-peak at 0.2,0.3,0.4m
+    //"cfarCfg -1 0 2 8 4 3 0 15 1",
+    "cfarCfg -1 0 2 4 3 2 0 15 1", //->26.11.27 range CFAR winLen 8->4 (cells per side), guard 4->3, noiseDiv 3->2 (CASO: log2(winLen)). 0.2 m target (bin 7) was in the non-cyclic edge zone (guard+win = 12) so only the right window, holding the 2R ghost, was used
     "cfarCfg -1 1 0 4 2 3 1 15 1",
     //"multiObjBeamForming -1 1 0.5",
     gMmwDemoMultiObjBeamFormingCmd, //->26.09.02 "multiObjBeamForming -1 0 0.5", updatable over SPI1

@@ -138,8 +138,8 @@ UART TLV의 포인트 순서는 도플러 빈 오름차순, 그 안에서 레인
 
 nRF `uartOneD_parse_packet()`의 동작은 다음과 같다.
 
-- 보정 후 거리가 150mm(`TI_MIN_CAL_RANGE_MM`) 이상인 점만 후보로 둔다(26.11.24 전에는 raw 0.30m였다).
-- 후보 중 SNR이 12.0dB(`TI_PICK_MIN_SNR_DB10`) 이상인 가장 가까운 점을 고르고, 없으면 SNR이 가장 큰 점을 고른다. 2R 유령이 타깃보다 SNR이 높은 경우(0.8~1.0m)를 막기 위한 규칙이다.
+- 보정 후 거리가 187mm(`TI_MIN_CAL_RANGE_MM`) 이상인 점만 후보로 둔다. 26.11.24 전에는 raw 0.30m, 26.11.27 전에는 150mm였다. 부팅 후 2~3분 동안 잡히는 bin 7 정적 누설점(보정 173~181mm)을 거르고 0.2m 타깃(보정 194~213mm)은 남기는 값이며, 양쪽 여유는 6~7mm뿐이다.
+- 후보 중 SNR이 10.0dB(`TI_PICK_MIN_SNR_DB10`, 26.11.27에 12.0에서 낮춤) 이상인 가장 가까운 점을 고르고, 없으면 SNR이 가장 큰 점을 고른다. 2R 유령이 타깃보다 SNR이 높은 경우(0.8~1.0m)를 막기 위한 규칙이다.
 - side-info TLV가 없으면 후보 중 가장 가까운 점을 고른다.
 - 유효한 점이 없으면 이전 값을 유지한다.
 - `RADAR_LOG_ALL_POINTS`가 현재 1이라 프레임마다 모든 점을 로그로 출력한다.
@@ -148,3 +148,12 @@ nRF `uartOneD_parse_packet()`의 동작은 다음과 같다.
 
 - BLE(`send_dist_ble`, 1초 주기): 필터를 거치지 않은 `obj1_distance_mm`
 - RS485 Modbus: 헌팅 방지 필터를 거친 `obj1_distance_filtered_mm`
+
+## 근거리(0.2~0.4m) 측정 관련 설정
+
+26.11.23~27 시험으로 정한 값이다. 바꾸기 전에 아래 이유를 확인한다. 시험 기록은 `C:\CHOYJ_\ClaudeAI_CHOYJ\TI_IWR1843_TEST\YYMMDD_TESTn` 폴더에 있고, 분석 절차는 `radar-log-analysis` 스킬에 있다.
+
+- 거리 빈 하나는 약 39.5mm다(512빈).
+- **거리 CFAR `cfarCfg -1 0 2 4 3 2 0 15 1`:** CLI의 winLen은 한쪽 셀 수다(HWA `numNoiseSamples` = winLen>>1이고 하드웨어가 두 배로 쓴다). CASO에서는 noiseDiv를 log2(winLen)으로 맞춘다. 비순환 모드라 앞쪽 guard+win 빈 안에서는 오른쪽 창만 쓰는데, 예전 값(guard 4, win 8, 경계 12빈)에서는 0.2m 타깃(bin 7)의 오른쪽 창에 2R 유령이 들어가 타깃이 검출되지 않았다. SDK는 winLen 2를 거부하고 (guard+win)·2 < numRangeBins를 요구한다.
+- **`calibDcRangeSig -1 1 -5 4 256`:** 부팅 때 256 chirp 평균을 한 번 구해 이후 계속 뺀다. 양의 빈을 8까지 두면 0.33m 이하가 지워질 수 있어 4로 줄였다. 그 결과 bin 5~7의 정적 누설(약 95~97dB)이 드러났다. bin 7 누설점(보정 173~181mm)은 부팅 후 2~3분 동안만 검출된다(칩이 데워지면서 bin 0~3의 CFAR 잡음이 올라간다). nRF의 187mm 필터로 거른다.
+- **`guiMonitor`의 range profile(3번째 인자):** 평소에는 0이다. 1로 켜면 MSS가 512빈을 115200bps로 보내느라 프레임 주기(100ms)를 넘겨 `objectdetection.c`의 프레임 마감 assert에 걸린다. 그래서 `mss_main.c`가 앞쪽 64빈만 보내도록 제한했다(`MMWDEMO_RANGE_PROFILE_OUT_BINS`). nRF는 `RADAR_LOG_RANGE_PROFILE`로 1초마다 로그를 찍는다. 켜 두면 RTT 로그가 많이 빠진다.

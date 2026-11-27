@@ -1196,6 +1196,12 @@ static void MmwDemo_measurementResultOutput(DPU_AoAProc_compRxChannelBiasCfg *co
 *   @param[in] result       Pointer to result from object detection DPC processing
 *   @param[in] timingInfo   Pointer to timing information provided from core that runs data path
 */
+//->26.11.27 Range profile TLV sends only the first MMWDEMO_RANGE_PROFILE_OUT_BINS bins
+//           (64 bins = about 2.5 m). The full 512-bin profile (~1 KB) takes about
+//           100 ms at the 115200 logging baud, which overruns the 100 ms frame and
+//           trips the DSS frame-deadline assert (objectdetection.c interSubFrameProcToken).
+#define MMWDEMO_RANGE_PROFILE_OUT_BINS      64U
+
 static void MmwDemo_transmitProcessedOutput
 (
     UART_Handle     uartHandle,
@@ -1218,9 +1224,17 @@ static void MmwDemo_transmitProcessedOutput
     cmplx16ImRe_t *azimuthStaticHeatMap;
     DPIF_PointCloudSideInfo *objOutSideInfo;
     DPC_ObjectDetection_Stats *stats;
-    
+    uint32_t numProfileBins; //->26.11.27 range profile bins sent
+
     /* Get subframe configuration */
     subFrameCfg = &gMmwMssMCB.subFrameCfg[result->subFrameIdx];
+
+    //->26.11.27
+    numProfileBins = subFrameCfg->numRangeBins;
+    if (numProfileBins > MMWDEMO_RANGE_PROFILE_OUT_BINS)
+    {
+        numProfileBins = MMWDEMO_RANGE_PROFILE_OUT_BINS;
+    }
 
     /* Get Gui Monitor configuration */
     pGuiMonSel = &subFrameCfg->guiMonSel;
@@ -1292,7 +1306,8 @@ static void MmwDemo_transmitProcessedOutput
     if (pGuiMonSel->logMagRange)
     {
         tl[tlvIdx].type = MMWDEMO_OUTPUT_MSG_RANGE_PROFILE;
-        tl[tlvIdx].length = sizeof(uint16_t) * subFrameCfg->numRangeBins;
+        //tl[tlvIdx].length = sizeof(uint16_t) * subFrameCfg->numRangeBins;
+        tl[tlvIdx].length = sizeof(uint16_t) * numProfileBins; //->26.11.27
         packetLen += sizeof(MmwDemo_output_message_tl) + tl[tlvIdx].length;
         tlvIdx++;
     }
@@ -1382,7 +1397,8 @@ static void MmwDemo_transmitProcessedOutput
                            (uint8_t*)&tl[tlvIdx],
                            sizeof(MmwDemo_output_message_tl));
 
-        for(index = 0; index < subFrameCfg->numRangeBins; index++)
+        //for(index = 0; index < subFrameCfg->numRangeBins; index++)
+        for(index = 0; index < numProfileBins; index++) //->26.11.27
         {
             UART_writePolling (uartHandle,
                     (uint8_t*)&detMatrix[index*subFrameCfg->numDopplerBins],
