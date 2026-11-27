@@ -62,7 +62,7 @@
  *          - "spiMba<M>", e.g. "spiMba0": lowPower adcMode (0/1), power-up only.
  *          Run-time updates (applied at the next frame, like spiMca):
  *          - "spiMda<E>": "clutterRemoval -1 <E>"
- *          - "spiMea<E>": "calibDcRangeSig -1 <E> -5 8 256"
+ *          - "spiMea<E>": "calibDcRangeSig -1 <E> -5 4 256"
  *          - "spiMfa<E>": "extendedMaxVelocity -1 <E>"
  *          - "spiMga<AA>b<BB>c<CC>d<DD>", e.g. "spiMga45b45c30d30":
  *            "aoaFovCfg -1 -<AA> <BB> -<CC> <DD>" (degrees, 2 digits each,
@@ -644,7 +644,7 @@ static void MmwDemo_spi1HandleDynCmd(int32_t cmdIdx, const char *rxBuf, uint8_t 
             CLI_write("SPI1: clutterRemoval -1 %d (applied at next frame)\n", (int32_t)onOff);
             break;
         case MMWDEMO_SPI1_CMD_CALIBDC:
-            CLI_write("SPI1: calibDcRangeSig -1 %d -5 8 256 (applied at next frame)\n", (int32_t)onOff);
+            CLI_write("SPI1: calibDcRangeSig -1 %d -5 4 256 (applied at next frame)\n", (int32_t)onOff);
             break;
         case MMWDEMO_SPI1_CMD_EXTMAXVEL:
             CLI_write("SPI1: extendedMaxVelocity -1 %d (applied at next frame)\n", (int32_t)onOff);

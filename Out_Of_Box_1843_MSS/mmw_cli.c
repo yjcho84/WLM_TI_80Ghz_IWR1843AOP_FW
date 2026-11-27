@@ -188,7 +188,8 @@ static char gMmwDemoLowPowerCmd[MMWDEMO_LOWPOWER_CMD_MAX_LEN] = "lowPower 0 0";
  * the next frame boundary and the table entry is rewritten to match. */
 #define MMWDEMO_DYNCFG_CMD_MAX_LEN              48
 static char gMmwDemoClutterRemovalCmd[MMWDEMO_DYNCFG_CMD_MAX_LEN]  = "clutterRemoval -1 0";
-static char gMmwDemoCalibDcRangeSigCmd[MMWDEMO_DYNCFG_CMD_MAX_LEN] = "calibDcRangeSig -1 1 -5 8 256";
+//static char gMmwDemoCalibDcRangeSigCmd[MMWDEMO_DYNCFG_CMD_MAX_LEN] = "calibDcRangeSig -1 1 -5 8 256";
+static char gMmwDemoCalibDcRangeSigCmd[MMWDEMO_DYNCFG_CMD_MAX_LEN] = "calibDcRangeSig -1 1 -5 4 256"; //->26.11.24 positiveBinIdx 8->4 (keep 0.2 m target out of DC subtraction)
 static char gMmwDemoExtMaxVelocityCmd[MMWDEMO_DYNCFG_CMD_MAX_LEN]  = "extendedMaxVelocity -1 0";
 static char gMmwDemoAoaFovCfgCmd[MMWDEMO_DYNCFG_CMD_MAX_LEN]       = "aoaFovCfg -1 -90 90 -90 90";
 static char gMmwDemoCfarFovRangeCmd[MMWDEMO_DYNCFG_CMD_MAX_LEN]    = "cfarFovCfg -1 0 0 16.18";
@@ -220,8 +221,8 @@ static char* gMmwDemoAutoCfgCommands[] =
     gMmwDemoFrameCfgCmd, //->26.10.21 "frameCfg 0 2 16 0 1000 1 0", periodicity set over SPI1 at power-up
     //"lowPower 0 0",
     gMmwDemoLowPowerCmd, //->26.10.21 "lowPower 0 0", adcMode set over SPI1 at power-up
-    //"guiMonitor -1 1 1 0 0 0 1",
-    "guiMonitor -1 1 0 0 0 0 0",
+    //"guiMonitor -1 1 0 0 0 0 0", //-> 26.11.27 Original
+    "guiMonitor -1 1 1 0 0 0 0", //-> 26.11.27 To check for the presence of a bin-peak at 0.2,0.3,0.4m
     "cfarCfg -1 0 2 8 4 3 0 15 1",
     "cfarCfg -1 1 0 4 2 3 1 15 1",
     //"multiObjBeamForming -1 1 0.5",
@@ -230,7 +231,7 @@ static char* gMmwDemoAutoCfgCommands[] =
     gMmwDemoClutterRemovalCmd, //->26.10.23 "clutterRemoval -1 0", updatable over SPI1
     //"calibDcRangeSig -1 0 -5 8 256",
     //"calibDcRangeSig -1 1 -5 8 256", //->26.09.02
-    gMmwDemoCalibDcRangeSigCmd, //->26.10.23 "calibDcRangeSig -1 1 -5 8 256", updatable over SPI1
+    gMmwDemoCalibDcRangeSigCmd, //->26.10.23 "calibDcRangeSig -1 1 -5 8 256", updatable over SPI1 //->26.11.24 "-5 4 256"
     //"extendedMaxVelocity -1 0",
     gMmwDemoExtMaxVelocityCmd, //->26.10.23 "extendedMaxVelocity -1 0", updatable over SPI1
     "lvdsStreamCfg -1 0 0 0",
@@ -1109,7 +1110,7 @@ int32_t MmwDemo_CLIUpdateClutterRemoval (uint32_t enabled)
 /**
  *  @b Description
  *  @n
- *      Run-time update of "calibDcRangeSig -1 <enabled> -5 8 256". A changed
+ *      Run-time update of "calibDcRangeSig -1 <enabled> -5 4 256". A changed
  *      configuration restarts the DC range signature calibration (the next
  *      256 chirps, i.e. a few frames, are averaged again).
  *
@@ -1133,7 +1134,8 @@ int32_t MmwDemo_CLIUpdateCalibDcRangeSig (uint32_t enabled)
     argv[1] = "-1";
     argv[2] = (enabled != 0U) ? "1" : "0";
     argv[3] = "-5";
-    argv[4] = "8";
+    //argv[4] = "8";
+    argv[4] = "4"; //->26.11.24 positiveBinIdx 8->4
     argv[5] = "256";
 
     return MmwDemo_CLIApplyDynCfg (MmwDemo_CLICalibDcRangeSig, 6, argv,

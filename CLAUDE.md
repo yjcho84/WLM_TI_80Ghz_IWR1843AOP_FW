@@ -110,14 +110,7 @@ nRF 쪽(`main()`의 `ti_boot_cfg_send()`)은 다음 순서로 보낸다. 각 명
 
 ### 사양서와 코드의 차이
 
-사양서를 읽을 때는 셀 메모도 함께 읽는다. 고정 길이 SPI 형식은 G28(`spiMaa`), F33(`spiMga`), F34(`spiMha`)의 메모에 적혀 있다. 코드에서는 `gMmwDemoSpi1CmdPatterns[]`와 `ti_spi_format_dyn_cmd()`가 기준이다.
-
-| 항목 | 사양서 | 코드 |
-|---|---|---|
-| `spiMh` 셀 예시(B34, E34) | `spiMha1.25` (F34 메모는 `spiMha01.25`) | 5글자 고정 `spiMha01.25` |
-| `spiAhL` 응답 예시(C19, D19) | `spiAha15.0` | 소수 둘째 자리까지 `spiAha15.00` |
-| `spiAeL` 행의 nRF 열(D13, E13) | `spiAda1`, `spiAdL` | 오타이며 실제는 `spiAea1`, `spiAeL` |
-| MBF 임계값 범위 | 0.25~1.00 | nRF, TI 모두 강제하지 않음. SPI 형식상 최대 9.99 |
+사양서를 읽을 때 주의할 점과 사양서-코드 차이 표는 `spi-cmd-add` 스킬에 있다. 사양서를 다룰 때는 그 스킬을 먼저 읽는다.
 
 아직 고치지 않은 `spiAca` 처리 문제가 있다. 사용자에게 이미 알린 내용이다.
 
@@ -126,11 +119,7 @@ nRF 쪽(`main()`의 `ti_boot_cfg_send()`)은 다음 순서로 보낸다. 각 명
 
 ### 새 SPI 명령 추가
 
-1. TI: `gMmwDemoSpi1CmdPatterns[]`와 `MMWDEMO_SPI1_CMD_*`에 패턴을 추가하고, `MmwDemo_spi1SlaveTask`의 핸들러 분기를 연결한다. 필요하면 `MMWDEMO_SPI1_CMD_MAX_LEN`도 늘린다.
-2. TI: `mmw_cli.c`에 변경 가능한 테이블 버퍼와 `MmwDemo_CLIUpdate*()`를 추가한다.
-3. nRF `cho_fds.h`: FDS ID와 기본값을 추가한다. 기본값은 TI 테이블의 초기값과 같아야 한다. 현재 사용 범위는 31~40이다.
-4. nRF `cho_ble_protocol.c`: `ble_data_parser()`의 `case`와 `ble_spi_dyn_params[]`, `ble_spi_dyn_param()`을 수정한다.
-5. nRF `cho_test_code_260807.c`: `ti_dyn_params[]`와 `ti_spi_format_dyn_cmd()`를 수정한다. 여기에 등록하면 `ti_boot_cfg_send()`가 부팅 때 자동으로 복원한다. `SPI_CMD_MAX_LEN`은 TI와 맞춘다.
+TI와 nRF 양쪽 5단계 절차는 `spi-cmd-add` 스킬(`.claude/skills/spi-cmd-add/SKILL.md`)에 있다.
 
 ## 하드웨어와 RTOS 제약
 
@@ -149,8 +138,9 @@ UART TLV의 포인트 순서는 도플러 빈 오름차순, 그 안에서 레인
 
 nRF `uartOneD_parse_packet()`의 동작은 다음과 같다.
 
-- 0.30m(`TI_MIN_RANGE_M`) 이상인 점 중 SNR이 가장 큰 점의 거리를 고른다. 전체를 정렬하지는 않는다.
-- side-info TLV가 없으면 0.30m 이상에서 가장 가까운 점을 고른다.
+- 보정 후 거리가 150mm(`TI_MIN_CAL_RANGE_MM`) 이상인 점만 후보로 둔다(26.11.24 전에는 raw 0.30m였다).
+- 후보 중 SNR이 12.0dB(`TI_PICK_MIN_SNR_DB10`) 이상인 가장 가까운 점을 고르고, 없으면 SNR이 가장 큰 점을 고른다. 2R 유령이 타깃보다 SNR이 높은 경우(0.8~1.0m)를 막기 위한 규칙이다.
+- side-info TLV가 없으면 후보 중 가장 가까운 점을 고른다.
 - 유효한 점이 없으면 이전 값을 유지한다.
 - `RADAR_LOG_ALL_POINTS`가 현재 1이라 프레임마다 모든 점을 로그로 출력한다.
 
